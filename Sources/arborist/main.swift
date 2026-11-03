@@ -96,7 +96,7 @@ case "render":
             try! svg.write(toFile: dir + String(format: "/frame-%03d.svg", i), atomically: true, encoding: .utf8)
             return LeafSVG.drawn(r, map: map, hover: t.hovered, pinned: t.pinned, now: sample ? LeafSample.now : Date())
         }
-        let report = HoverSweep.Report(frames)
+        let report = HoverSweep.Report(frames, cases: LayoutCase.all(r, map: map, now: sample ? LeafSample.now : Date()))
         try! HoverSweep.json(report).write(to: URL(fileURLWithPath: dir + "/frames.json"))
         print(report.summary)
         print("frames in \(dir)")

@@ -173,8 +173,8 @@ struct LeafCanvas: View {
     }
 }
 
-/// D24: the detail strip. Nothing at rest; on hover or pin it fades in (0.2 s, none with Reduce Motion) over
-/// the fixed footer slot below the map. Shows the pinned leaf, else the hovered one. Fixed rows and columns
+/// D24: the leaf details in the shared slot. Nothing at rest (the legend shows); on hover or pin they
+/// crossfade in (0.2 s, none with Reduce Motion) in the same rect. Shows the pinned leaf, else the hovered one. Fixed rows and columns
 /// from Core's StripLayout: only the values swap, single-line and truncated, with no animation on content.
 struct DetailStrip: View {
     @EnvironmentObject var hover: HoverModel
@@ -228,29 +228,31 @@ struct StripContent: View {
     let pinned: Bool
 
     var body: some View {
+        let parts = StripLayout.named(in: Rect(x: 0, y: 0, w: 0, h: 0), branch: card.branch, tag: card.pill, repo: card.repo, pinned: pinned)
+        let at = { (n: String) in parts.first { $0.name == n }!.rect }
         ZStack(alignment: .topLeading) {
-            HStack(spacing: 7) {
-                Text(card.branch).font(.system(size: 12, weight: .semibold)).foregroundColor(Theme.ink)
-                    .lineLimit(1).truncationMode(.middle).layoutPriority(1)
-                Text(card.pill).font(.system(size: 10, weight: .medium)).lineLimit(1).fixedSize()
-                    .foregroundColor(Color(hex: LeafPalette.pillText(card.status)))
-                    .padding(.horizontal, 6).frame(height: 14)
-                    .background(Capsule().fill(Color(hex: LeafPalette.dot(card.status), opacity: 0.2)))
-                Text(card.repo).font(.system(size: 11)).foregroundColor(Theme.ink2).lineLimit(1).truncationMode(.tail)
-                Spacer(minLength: 4)
-                if pinned {
-                    Button { hover.unpin() } label: { Text("Pinned · Esc").font(.system(size: 10)) }
-                        .buttonStyle(HoverButtonStyle(kind: .link, height: 16))
-                        .foregroundColor(Color(hex: LeafPalette.ring))
-                        .help("Unpin (Esc, or click empty space on the map)")
-                        .fixedSize()
-                }
+            // Title row: branch, tag, repo (and the pin label), each in its own Core frame, truncated.
+            Text(card.branch).font(.system(size: 12, weight: .semibold)).foregroundColor(Theme.ink)
+                .lineLimit(1).truncationMode(.middle).help(card.branch)
+                .stripFrame(at("branch"), alignment: .leading)
+            Text(card.pill).font(.system(size: 10, weight: .medium)).lineLimit(1).truncationMode(.tail)
+                .foregroundColor(Color(hex: LeafPalette.pillText(card.status)))
+                .padding(.horizontal, StripLayout.tagPadding)
+                .frame(maxWidth: .infinity, maxHeight: 14, alignment: .leading)
+                .background(Capsule().fill(Color(hex: LeafPalette.dot(card.status), opacity: 0.2)))
+                .stripFrame(at("tag"), alignment: .leading)
+            Text(card.repo).font(.system(size: 11)).foregroundColor(Theme.ink2).lineLimit(1).truncationMode(.tail)
+                .stripFrame(at("repo"), alignment: .leading)
+            if pinned {
+                Button { hover.unpin() } label: { Text("Pinned · Esc").font(.system(size: 10)) }
+                    .buttonStyle(HoverButtonStyle(kind: .link, height: 16))
+                    .foregroundColor(Color(hex: LeafPalette.ring))
+                    .help("Unpin (Esc, or click empty space on the map)")
+                    .stripFrame(at("pinned"), alignment: .trailing)
             }
-            .stripFrame(StripLayout.row("title"), alignment: .leading)
             Text(card.path).font(.system(size: 10, design: .monospaced)).foregroundColor(Theme.ink2)
                 .lineLimit(1).truncationMode(.middle).help(card.fullPath)
                 .stripFrame(StripLayout.row("path"), alignment: .leading)
-            Color.clear.stripFrame(StripLayout.row("stats"))
             let stats = [("Size", card.size), ("Changes", card.changes), ("Sync", card.sync), ("Last commit", card.lastCommit)]
             ForEach(stats.indices, id: \.self) { k in
                 VStack(alignment: .leading, spacing: 1) {
@@ -264,12 +266,10 @@ struct StripContent: View {
             Text(card.message.joined(separator: " ")).font(.system(size: 11)).foregroundColor(Theme.ink)
                 .lineLimit(1).truncationMode(.tail)
                 .stripFrame(StripLayout.row("message"), alignment: .leading)
-            // Fixed frames from StripLayout (the sweep's reach path ends on the first one).
-            let y = PopoverLayout.stripHeight - StripLayout.padding - StripLayout.row
-            ForEach(StripLayout.buttons.indices, id: \.self) { i in
-                let b = StripLayout.buttons[i]
-                button(b.name)
-                    .stripFrame(Rect(x: StripLayout.padding + b.x, y: y, w: b.w, h: StripLayout.row), alignment: .center)
+            // Buttons row: left-aligned to the grid, Remove at the right (the sweep's reach path ends on the first).
+            ForEach(StripLayout.buttons(in: Rect(x: 0, y: 0, w: 0, h: 0)).indices, id: \.self) { i in
+                let b = StripLayout.buttons(in: Rect(x: 0, y: 0, w: 0, h: 0))[i]
+                button(b.name).stripFrame(b.rect, alignment: .center)
             }
         }
         .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.stripHeight, alignment: .topLeading)

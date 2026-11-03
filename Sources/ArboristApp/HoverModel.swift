@@ -14,6 +14,9 @@ final class HoverModel: ObservableObject {
     var instant = false
     /// D24: the strip's text and button frames as SwiftUI drew them (popover coordinates); nil while hidden.
     var drawnStripFrames: [Rect]?
+    /// D24: the shared slot's frame and the footer buttons' frames as drawn.
+    var drawnSlotFrame: Rect?
+    var drawnFooterButtons: [Rect]?
     /// One pending leave timer at a time; a newer event cancels it. A main-actor Task, so the timer
     /// never touches this model off the main actor.
     private var settleWork: Task<Void, Never>?

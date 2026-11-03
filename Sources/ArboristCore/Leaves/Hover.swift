@@ -25,6 +25,10 @@ public struct PopoverSpace: Equatable, Sendable {
         Rect(x: mapOrigin.x, y: mapOrigin.y + PopoverLayout.mapHeight + PopoverLayout.stripGap,
              w: PopoverLayout.mapWidth, h: PopoverLayout.stripHeight)
     }
+    /// D24: the footer buttons' own row, below the slot.
+    public var footerRect: Rect {
+        Rect(x: mapOrigin.x, y: stripRect.y + stripRect.h + PopoverLayout.stripGap, w: PopoverLayout.mapWidth, h: PopoverLayout.footerRowHeight)
+    }
 }
 
 /// D22: the tooltip that follows the pointer: offset 12 pt right and below, flipped left/up at the
@@ -43,36 +47,130 @@ public enum TooltipPlacement {
     }
 }
 
-/// D22: where the detail strip's buttons sit (the app gives them these fixed frames). Strip coordinates
-/// are the popover's; the button row is at the strip's bottom.
+/// D24: the detail view in the shared slot below the map, in a strict vertical rhythm built from fixed
+/// constants: title row (branch, tag, repo), path, a 4-column grid, the commit message, then the buttons
+/// row (left-aligned to the grid, Remove at the right). Coordinates are relative to the slot's top-left
+/// unless a function takes the slot rect. Every row is one line, truncated; nothing overlaps at any length.
 public enum StripLayout {
-    public static let padding = 10.0, row = 22.0
+    public static let padding = 10.0, gap = 6.0
+    public static let titleHeight = 16.0, pathHeight = 14.0, gridHeight = 26.0, messageHeight = 14.0
+    /// Extra space below the commit message, before the buttons.
+    public static let messageBelow = 8.0
+    /// Button height, and the space between buttons / grid columns / title parts.
+    public static let row = 22.0, buttonGap = 8.0, columnGap = 8.0, titleGap = 7.0
+    public static let inner = PopoverLayout.mapWidth - 2 * padding
+    public static let titleY = padding
+    public static let pathY = titleY + titleHeight + gap
+    public static let gridY = pathY + pathHeight + gap
+    public static let messageY = gridY + gridHeight + gap
+    public static let buttonsY = messageY + messageHeight + messageBelow
+    /// The slot's height: the details exactly fill it.
+    public static let height = buttonsY + row + padding
+    /// The "Pinned · Esc" label at the title row's right, and the tag's horizontal padding.
+    public static let pinnedWidth = 74.0, tagPadding = 6.0
+
     public static let buttons: [(name: String, x: Double, w: Double)] = [
-        ("Reveal in Finder", 0, 120), ("Copy remove command", 128, 150), ("Remove worktree", 286, 142),
+        ("Reveal in Finder", 0, 120), ("Copy remove command", 120 + buttonGap, 150), ("Remove worktree", inner - 130, 130),
     ]
     public static func buttons(in strip: Rect) -> [(name: String, rect: Rect)] {
-        let y = strip.y + strip.h - padding - row
-        return buttons.map { ($0.name, Rect(x: strip.x + padding + $0.x, y: y, w: $0.w, h: row)) }
+        buttons.map { ($0.name, Rect(x: strip.x + padding + $0.x, y: strip.y + buttonsY, w: $0.w, h: row)) }
     }
     public static func button(at p: Pt, in strip: Rect) -> String? { buttons(in: strip).first { $0.rect.contains(p) }?.name }
 
-    /// D24: fixed text rows, relative to the strip's top-left. Only the values change between leaves; every
-    /// row is one line, truncated, never re-wrapped.
     public static let rows: [(name: String, rect: Rect)] = [
-        ("title", Rect(x: padding, y: 8, w: PopoverLayout.mapWidth - 2 * padding, h: 16)),
-        ("path", Rect(x: padding, y: 26, w: PopoverLayout.mapWidth - 2 * padding, h: 14)),
-        ("stats", Rect(x: padding, y: 42, w: PopoverLayout.mapWidth - 2 * padding, h: 26)),
-        ("message", Rect(x: padding, y: 70, w: PopoverLayout.mapWidth - 2 * padding, h: 14)),
+        ("title", Rect(x: padding, y: titleY, w: inner, h: titleHeight)),
+        ("path", Rect(x: padding, y: pathY, w: inner, h: pathHeight)),
+        ("stats", Rect(x: padding, y: gridY, w: inner, h: gridHeight)),
+        ("message", Rect(x: padding, y: messageY, w: inner, h: messageHeight)),
     ]
     public static func row(_ name: String) -> Rect { rows.first { $0.name == name }!.rect }
-    /// D24: the four stat columns (Size, Changes, Sync, Last commit), equal fixed widths.
+    /// The four grid columns (Size, Changes, Sync, Last commit): equal widths, `columnGap` apart.
     public static var columns: [Rect] {
-        let r = row("stats"), w = r.w / 4
-        return (0..<4).map { Rect(x: r.x + Double($0) * w, y: r.y, w: w, h: r.h) }
+        let r = row("stats"), w = (r.w - 3 * columnGap) / 4
+        return (0..<4).map { Rect(x: r.x + Double($0) * (w + columnGap), y: r.y, w: w, h: r.h) }
     }
-    /// D24: every text and button frame in the strip, in popover coordinates.
-    public static func frames(in strip: Rect) -> [Rect] {
-        (rows.map(\.rect) + columns).map { Rect(x: strip.x + $0.x, y: strip.y + $0.y, w: $0.w, h: $0.h) } + buttons(in: strip).map(\.rect)
+
+    /// The title row's parts for these strings: branch, tag, repo (and the pinned label). The tag keeps its
+    /// natural width; branch and repo share the rest (branch first, at least 60%), each truncated to its frame.
+    public static func title(branch: String, tag: String, repo: String, pinned: Bool) -> [(name: String, rect: Rect)] {
+        let r = row("title")
+        let end = r.x + r.w - (pinned ? pinnedWidth + titleGap : 0)
+        let tagW = min((LeafText.width(tag, size: 10) + 2 * tagPadding + 1).rounded(.up), 120)
+        let avail = max(0, end - r.x - tagW - 2 * titleGap)
+        let bNat = LeafText.width(branch, size: 12), rNat = LeafText.width(repo, size: 11, weight: false)
+        let bw = min(bNat, max(avail - rNat, avail * 0.6)), rw = max(0, min(rNat, avail - bw))
+        let tagX = r.x + bw + titleGap, repoX = tagX + tagW + titleGap
+        var out: [(String, Rect)] = [("branch", Rect(x: r.x, y: r.y, w: bw, h: r.h)),
+                                     ("tag", Rect(x: tagX, y: r.y, w: tagW, h: r.h)),
+                                     ("repo", Rect(x: repoX, y: r.y, w: rw, h: r.h))]
+        if pinned { out.append(("pinned", Rect(x: r.x + r.w - pinnedWidth, y: r.y, w: pinnedWidth, h: r.h))) }
+        return out
+    }
+
+    /// Every text and button frame in the details, in the slot's coordinates offset by `strip`'s origin.
+    public static func named(in strip: Rect, branch: String = "", tag: String = "", repo: String = "", pinned: Bool = false) -> [(name: String, rect: Rect)] {
+        let rel = title(branch: branch, tag: tag, repo: repo, pinned: pinned)
+            + [("path", row("path"))] + columns.enumerated().map { ("column\($0.offset)", $0.element) } + [("message", row("message"))]
+        return rel.map { ($0.0, Rect(x: strip.x + $0.1.x, y: strip.y + $0.1.y, w: $0.1.w, h: $0.1.h)) } + buttons(in: strip)
+    }
+    public static func frames(in strip: Rect, branch: String = "", tag: String = "", repo: String = "", pinned: Bool = false) -> [Rect] {
+        named(in: strip, branch: branch, tag: tag, repo: repo, pinned: pinned).map(\.rect)
+    }
+
+    /// Pairs of frames that overlap (positive area), plus frames not entirely inside `slot`.
+    public static func overlaps(_ f: [Rect], in slot: Rect) -> Int {
+        var n = 0
+        for i in f.indices {
+            let a = f[i]
+            if a.x < slot.x - 0.01 || a.y < slot.y - 0.01 || a.x + a.w > slot.x + slot.w + 0.01 || a.y + a.h > slot.y + slot.h + 0.01 { n += 1 }
+            for j in f.indices where j > i {
+                let b = f[j]
+                if min(a.x + a.w, b.x + b.w) - max(a.x, b.x) > 0.01 && min(a.y + a.h, b.y + b.h) - max(a.y, b.y) > 0.01 { n += 1 }
+            }
+        }
+        return n
+    }
+
+    /// D24: the frames that never depend on the leaf (everything below the title row), for the shift check.
+    public static func fixedPart(_ f: [Rect]) -> [Rect] {
+        guard let top = f.map(\.y).min() else { return [] }
+        return f.filter { abs($0.y - top) > 0.01 }
+    }
+}
+
+/// D24: the footer buttons, in their own row below the slot, so a pin never hides them.
+public enum FooterLayout {
+    public static let names = ["Clear", "Rescan", "List", "Settings", "Quit"]
+    public static func buttons(in r: Rect) -> [(name: String, rect: Rect)] {
+        let h = r.h
+        return [("Clear", Rect(x: r.x, y: r.y, w: 72, h: h)), ("Rescan", Rect(x: r.x + 80, y: r.y, w: 64, h: h)),
+                ("List", Rect(x: r.x + 152, y: r.y, w: 56, h: h)),
+                ("Settings", Rect(x: r.x + r.w - 64, y: r.y, w: 28, h: h)), ("Quit", Rect(x: r.x + r.w - 28, y: r.y, w: 28, h: h))]
+    }
+}
+
+/// D24: one title-row layout case (a leaf, or a synthetic extreme) and how many overlaps it has.
+public struct LayoutCase: Codable, Equatable, Sendable {
+    public var name: String
+    public var overlaps: Int
+    public init(name: String, overlaps: Int) { self.name = name; self.overlaps = overlaps }
+
+    /// Every leaf (pinned and not) plus synthetic extremes: the longest and shortest branch, tag, repo.
+    public static func all(_ r: ScanResult, map: LeafMap, now: Date = Date()) -> [LayoutCase] {
+        let slot = Rect(x: 0, y: 0, w: PopoverLayout.mapWidth, h: PopoverLayout.stripHeight)
+        var strings: [(String, String, String, String)] = map.leaves.compactMap { l in
+            WorktreeList.find(r, path: l.item.id).map { let c = HoverCard($0, now: now, home: LeafSample.home); return (l.item.id, c.branch, c.pill, c.repo) }
+        }
+        let long = String(repeating: "W", count: 240), mid = "feature/" + String(repeating: "m", count: 60)
+        for (n, b, t, p) in [("extreme long/long", long, "Uncommitted", long), ("extreme long/short", long, "Clean", "r"),
+                             ("extreme short/long", "b", "Unpushed", long), ("extreme short/short", "b", "M", "r"),
+                             ("extreme empty", "", "", ""), ("extreme mid/long tag", mid, String(repeating: "T", count: 80), mid)] {
+            strings.append((n, b, t, p))
+        }
+        return strings.flatMap { s in [false, true].map { pin in
+            LayoutCase(name: s.0 + (pin ? " (pinned)" : ""),
+                       overlaps: StripLayout.overlaps(StripLayout.frames(in: slot, branch: s.1, tag: s.2, repo: s.3, pinned: pin), in: slot))
+        } }
     }
 }
 
@@ -235,6 +333,14 @@ public enum HoverSweep {
         public var mapFrame: Rect?
         /// D24: the strip's text and button frames as drawn (nil when hidden).
         public var stripFrames: [Rect]?
+        /// D24: the shared slot's frame as drawn (same at rest, hover and pin).
+        public var slotFrame: Rect?
+        /// D24: the footer buttons' frames as drawn (nil or short: hidden).
+        public var footerButtons: [Rect]?
+        /// D24: overlapping or out-of-slot pairs among the drawn detail frames.
+        public var overlaps = 0
+        /// D24: a footer button is missing, empty, outside the popover or under the slot.
+        public var footerHidden = false
 
         public init(frame: Int, x: Double, y: Double, viewX: Double? = nil, viewY: Double? = nil, t: Double,
                     hovered: String?, pinned: String? = nil, strip: String? = nil, underPointer: String? = nil,
@@ -258,6 +364,8 @@ public enum HoverSweep {
             try c.encode(tooltipRect, forKey: .tooltipRect); try c.encode(tooltipClipped, forKey: .tooltipClipped)
             try c.encode(buttonUnderPointer, forKey: .buttonUnderPointer); try c.encode(reachTarget, forKey: .reachTarget)
             try c.encode(stripHeight, forKey: .stripHeight); try c.encode(mapFrame, forKey: .mapFrame); try c.encode(stripFrames, forKey: .stripFrames)
+            try c.encode(slotFrame, forKey: .slotFrame); try c.encode(footerButtons, forKey: .footerButtons)
+            try c.encode(overlaps, forKey: .overlaps); try c.encode(footerHidden, forKey: .footerHidden)
         }
 
         public var expected: String? { underPointer ?? snappedTo }
@@ -266,7 +374,10 @@ public enum HoverSweep {
         public var expectedStrip: String? { pinTruth ?? expected }
         public var isStripMismatch: Bool { expectedStrip != strip }
         /// D24: the strip is shown exactly when it has a leaf, at its full height, and takes 0 at rest.
-        public var isIdleStripViolation: Bool { strip == nil ? stripHeight != 0 : stripHeight != PopoverLayout.stripHeight }
+        /// D24: the details are drawn exactly when there's a leaf (legend at rest), at the slot's full height.
+        public var isIdleStripViolation: Bool {
+            strip == nil ? (stripHeight != 0 || stripFrames != nil) : (stripHeight != PopoverLayout.stripHeight || stripFrames == nil)
+        }
         public var isReachFailure: Bool { reachTarget && (buttonUnderPointer == nil || pinTruth == nil || strip != pinTruth || pinned != pinTruth) }
     }
 
@@ -295,9 +406,17 @@ public enum HoverSweep {
         public var stripLayoutShifts: Int
         public var idleFrames: Int
         public var pinnedFrames: Int
+        /// D24: frames whose slot frame differs from frame 0's (rest, hover, pin). Expected 0.
+        public var slotFrameShifts: Int
+        /// D24: frames where a footer button isn't visible (pinned ones included). Expected 0.
+        public var footerHiddenFrames: Int
+        /// D24: text/button overlaps in drawn frames plus every layout case. Expected 0.
+        public var overlaps: Int
+        public var layoutCases: [LayoutCase]
 
-        public init(_ frames: [Frame]) {
+        public init(_ frames: [Frame], cases: [LayoutCase] = []) {
             self.frames = frames
+            layoutCases = cases
             hoveredCount = frames.filter { $0.hovered != nil }.count
             mismatchFrames = frames.filter(\.isMismatch).map(\.frame)
             mismatches = mismatchFrames.count
@@ -311,24 +430,30 @@ public enum HoverSweep {
             idleStripViolations = frames.filter(\.isIdleStripViolation).count
             let map0 = frames.first?.mapFrame
             mapFrameShifts = frames.filter { $0.mapFrame == nil || $0.mapFrame != map0 }.count
-            let shown = frames.compactMap(\.stripFrames)
+            let shown = frames.compactMap(\.stripFrames).map(StripLayout.fixedPart)
             stripLayoutShifts = shown.filter { $0 != shown.first }.count + frames.filter { $0.strip != nil && $0.stripFrames == nil }.count
             idleFrames = frames.filter { $0.strip == nil }.count
             pinnedFrames = frames.filter { $0.pinned != nil }.count
+            let slot0 = frames.first?.slotFrame
+            slotFrameShifts = frames.filter { $0.slotFrame == nil || $0.slotFrame != slot0 }.count
+            footerHiddenFrames = frames.filter(\.footerHidden).count
+            overlaps = frames.map(\.overlaps).reduce(0, +) + cases.map(\.overlaps).reduce(0, +)
         }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: K.self)
-            self.init(try c.decode([Frame].self, forKey: .frames))
+            self.init(try c.decode([Frame].self, forKey: .frames), cases: try c.decodeIfPresent([LayoutCase].self, forKey: .layoutCases) ?? [])
         }
-        enum K: String, CodingKey { case frames }
+        enum K: String, CodingKey { case frames, layoutCases }
 
         public var summary: String {
             "\(frames.count) frames, \(hoveredCount) hovered, \(distinctHovered) distinct leaves, \(gapFrames) in gaps, \(tooltipFrames) with tooltip, "
                 + "\(mismatches) mismatches, \(stripMismatches) strip mismatches, \(tooltipClipped) clipped tooltips, "
                 + "\(reachFailures) reach failures, \(buttonHits) button hits, "
                 + "\(idleFrames) idle / \(pinnedFrames) pinned, \(idleStripViolations) idle-strip violations, "
-                + "\(mapFrameShifts) map frame shifts, \(stripLayoutShifts) strip layout shifts"
+                + "\(mapFrameShifts) map frame shifts, \(stripLayoutShifts) strip layout shifts, "
+                + "\(slotFrameShifts) slot frame shifts, \(footerHiddenFrames) footer-hidden frames, "
+                + "\(overlaps) overlaps (\(layoutCases.count) layout cases)"
                 + (mismatches > 0 ? " (frames \(mismatchFrames.map(String.init).joined(separator: ", ")))" : "")
         }
     }
@@ -355,8 +480,22 @@ public enum HoverSweep {
                      pinned: tracker.pinned, strip: tracker.strip, underPointer: truth, inGap: gap,
                      snappedTo: gap ? map.hit(at: q)?.item.id : nil, pinTruth: pinTruth, tooltipRect: rect,
                      tooltipClipped: clipped, buttonUnderPointer: button, reachTarget: reachTarget)
-        if let d = drawn { fr.stripHeight = d.stripHeight; fr.mapFrame = d.mapFrame; fr.stripFrames = d.stripFrames.map(Self.sorted) }
+        if let d = drawn {
+            fr.stripHeight = d.stripHeight; fr.mapFrame = d.mapFrame; fr.stripFrames = d.stripFrames.map(Self.sorted)
+            fr.slotFrame = d.slotFrame; fr.footerButtons = d.footerButtons
+            if let sf = d.stripFrames, let slot = d.slotFrame { fr.overlaps = StripLayout.overlaps(sf, in: slot) }
+            fr.footerHidden = footerHidden(d.footerButtons, slot: d.slotFrame, popover: tracker.space?.size)
+        }
         return fr
+    }
+
+    /// D24: true unless all five footer buttons have a real frame inside the popover and clear of the slot.
+    public static func footerHidden(_ b: [Rect]?, slot: Rect?, popover: Pt?) -> Bool {
+        guard let b, b.count == FooterLayout.names.count else { return true }
+        return b.contains { r in
+            r.w <= 0 || r.h <= 0 || (popover.map { !r.inside(width: $0.x + 0.01, height: $0.y + 0.01) } ?? false)
+                || (slot.map { r.intersects($0) } ?? false)
+        }
     }
 
     /// D24: frames in reading order, so renderers that report in any order compare equal.
@@ -367,8 +506,11 @@ public enum HoverSweep {
         public var mapFrame: Rect
         public var stripHeight: Double
         public var stripFrames: [Rect]?
-        public init(mapFrame: Rect, stripHeight: Double, stripFrames: [Rect]?) {
+        public var slotFrame: Rect?
+        public var footerButtons: [Rect]?
+        public init(mapFrame: Rect, stripHeight: Double, stripFrames: [Rect]?, slotFrame: Rect? = nil, footerButtons: [Rect]? = nil) {
             self.mapFrame = mapFrame; self.stripHeight = stripHeight; self.stripFrames = stripFrames
+            self.slotFrame = slotFrame; self.footerButtons = footerButtons
         }
     }
 

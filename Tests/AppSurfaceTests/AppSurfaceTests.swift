@@ -73,6 +73,10 @@ final class AppSurfaceTests: XCTestCase, @unchecked Sendable {
         tracker.space = sp; _ = tracker.space
         let (steps, pin) = HoverSweep.steps(map, space: sp)
         for s in steps { switch s { case .move(let p), .click(let p): _ = (p, HoverSweep.onMap(p, map)); case .leave, .escape: break } }
+        _ = (PopoverLayout.height, PopoverLayout.headerHeight, PopoverLayout.footerRowHeight, FooterLayout.names, sp.footerRect,
+             StripLayout.named(in: sp.stripRect, branch: "", tag: "", repo: "", pinned: true), StripLayout.fixedPart([]),
+             rep.slotFrameShifts, rep.footerHiddenFrames, rep.overlaps, LayoutCase.all(LeafSample.busy, map: map),
+             HoverSweep.Drawn(mapFrame: Rect(x: 0, y: 0, w: 1, h: 1), stripHeight: 0, stripFrames: nil, slotFrame: nil, footerButtons: nil))
         _ = (pin, rep.stripMismatches, rep.tooltipClipped, rep.reachFailures, rep.buttonHits, rep.idleStripViolations, rep.mapFrameShifts, rep.stripLayoutShifts)
         _ = (PopoverAction.allCases, PopoverActionOutcome.fired(.list).log, SettingsOpening.steps(osMajor: 14),
              SettingsOpening.shouldBecomeAccessory(otherVisibleWindows: 0))

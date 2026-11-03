@@ -105,7 +105,8 @@ enum HoverSweepRunner {
             let my = host.isFlipped ? mf.minY : host.bounds.height - mf.maxY
             let sf = hover.visible.strip == nil ? nil : hover.drawnStripFrames
             let drawn = HoverSweep.Drawn(mapFrame: Rect(x: mf.minX, y: my, w: mf.width, h: mf.height),
-                                         stripHeight: sf == nil ? 0 : PopoverLayout.stripHeight, stripFrames: sf)
+                                         stripHeight: sf == nil ? 0 : PopoverLayout.stripHeight, stripFrames: sf,
+                                         slotFrame: hover.drawnSlotFrame, footerButtons: hover.drawnFooterButtons)
             frames.append(HoverSweep.frame(i, pointer: p, last: last, t: t, tracker: hover.tracker, map: map, transform: transform,
                                            pinTruth: pinTruth, reachTarget: i == reachAt, drawn: drawn))
             let marker = p.map { tracking.convert(CGPoint(x: transform.toView($0).x, y: transform.toView($0).y), to: host) }
@@ -114,7 +115,7 @@ enum HoverSweepRunner {
             // D22: the popover never resizes on hover.
             if host.fittingSize != sizeBefore { fail("popover resized on hover: \(sizeBefore) → \(host.fittingSize) at frame \(i)") }
         }
-        let report = HoverSweep.Report(frames)
+        let report = HoverSweep.Report(frames, cases: LayoutCase.all(model.result ?? scan, map: map))
         do { try HoverSweep.json(report).write(to: URL(fileURLWithPath: dir + "/frames.json")) } catch { fail("\(error)") }
         precondition(model.pendingCleanup == nil && model.cleanupResults == nil && !model.cleaning, "cleanup must not run")
         window.orderOut(nil)
