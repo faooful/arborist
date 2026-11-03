@@ -16,3 +16,7 @@
 - No Full Disk Access. Unreadable paths are skipped and counted.
 - Visuals: plain for now; Dara is redesigning the popover. Earlier direction was Kanso-style.
 - Commits authored and committed as Joseph Korol <joseph.m.korol@gmail.com>. Feature branches and PRs only.
+
+## PRs
+- #1 `v1-scanner-cli-app`: scanner, `arborist` CLI with JSON, menu bar popover app (D1–D8).
+- #2 `v1-h8-leaves` (stacked on #1): H8 leaf map in the popover (D9) and the wilting menu bar leaf (D10). Layout in `Sources/ArboristCore/Leaves`; Linux snapshots in `project-context/shots/` via `scripts/render-shots.sh`.

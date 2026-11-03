@@ -5,13 +5,34 @@ public struct ArboristConfig: Codable, Equatable, Sendable {
     public var roots: [String]
     public var lowSpaceThresholdGB: Double
     public var maxDepth: Int
+    /// Menu bar leaf stages, as multiples of the low-space threshold (D10).
+    public var leafStages: StageMultipliers
+    /// Show the free-space text next to the menu bar leaf.
+    public var showFreeText: Bool
 
     public static var home: String { FileManager.default.homeDirectoryForCurrentUser.path }
     public static var defaults: ArboristConfig {
         ArboristConfig(roots: ["~", "~/Documents"], lowSpaceThresholdGB: 20, maxDepth: 4)
     }
-    public init(roots: [String], lowSpaceThresholdGB: Double, maxDepth: Int) {
+    public init(roots: [String], lowSpaceThresholdGB: Double, maxDepth: Int,
+                leafStages: StageMultipliers = .default, showFreeText: Bool = true) {
         self.roots = roots; self.lowSpaceThresholdGB = lowSpaceThresholdGB; self.maxDepth = maxDepth
+        self.leafStages = leafStages; self.showFreeText = showFreeText
+    }
+
+    /// Missing keys fall back to defaults, so older or hand-written config files keep working.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = Self.defaults
+        roots = try c.decodeIfPresent([String].self, forKey: .roots) ?? d.roots
+        lowSpaceThresholdGB = try c.decodeIfPresent(Double.self, forKey: .lowSpaceThresholdGB) ?? d.lowSpaceThresholdGB
+        maxDepth = try c.decodeIfPresent(Int.self, forKey: .maxDepth) ?? d.maxDepth
+        leafStages = try c.decodeIfPresent(StageMultipliers.self, forKey: .leafStages) ?? d.leafStages
+        showFreeText = try c.decodeIfPresent(Bool.self, forKey: .showFreeText) ?? d.showFreeText
+    }
+
+    public func stage(freeBytes: Int64) -> LeafStage {
+        LeafStage.stage(freeBytes: freeBytes, thresholdGB: lowSpaceThresholdGB, multipliers: leafStages)
     }
 
     public static var fileURL: URL {

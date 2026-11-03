@@ -23,6 +23,15 @@ final class AppModel: ObservableObject {
     }
 
     var freeLabel: String { freeBytes.map(Format.bytes) ?? "—" }
+    var stage: LeafStage { config.stage(freeBytes: freeBytes ?? Int64.max) }
+
+    /// Leaf map for the popover, rebuilt only when a scan finishes.
+    @Published private(set) var leafMap: LeafMap?
+
+    /// Read-only "Clear": copies the `git worktree remove` commands for every stale worktree.
+    var staleCommands: [String] {
+        (result?.repos ?? []).flatMap(\.worktrees).filter(\.stale).compactMap(\.removeCommand)
+    }
 
     func rescan() {
         guard !scanning else { return }
@@ -32,6 +41,7 @@ final class AppModel: ObservableObject {
             let r = Scanner(config: cfg).scan()
             await MainActor.run {
                 self.result = r
+                self.leafMap = LeafLayout.layout(LeafLayout.groups(from: r), staleCount: r.totals.staleWorktrees)
                 self.scanning = false
                 self.freeBytes = r.volume?.freeBytes ?? self.freeBytes
                 self.checkLowSpace()

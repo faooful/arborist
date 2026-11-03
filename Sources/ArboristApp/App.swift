@@ -12,7 +12,13 @@ struct ArboristApp: App {
         MenuBarExtra {
             PopoverView().environmentObject(model)
         } label: {
-            Text(model.freeLabel)
+            // Wilting leaf (D10) plus optional free-space text.
+            HStack(spacing: 3) {
+                Image(nsImage: LeafIcon.image(model.stage))
+                if model.config.showFreeText { Text(model.freeLabel) }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(LeafStage.accessibilityLabel(model.stage, freeBytes: model.freeBytes ?? 0))
         }
         .menuBarExtraStyle(.window)
 
@@ -21,7 +27,6 @@ struct ArboristApp: App {
         }
     }
 }
-
 #else
 // The app is macOS-only. On Linux this target builds a stub so `swift build` covers the rest.
 @main

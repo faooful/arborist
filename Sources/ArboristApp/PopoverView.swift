@@ -3,24 +3,42 @@ import AppKit
 import ArboristCore
 import SwiftUI
 
-/// The whole app: a small popover under the menu bar item. Plain styling until the popover redesign lands.
+/// The whole app: a 480pt popover under the menu bar item, in the H8 "leaves" design (D9).
 struct PopoverView: View {
     @EnvironmentObject var model: AppModel
+    @State private var picked: LeafItem?
+    @State private var showList = false
+    @State private var copied = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("\(model.freeLabel) free").font(.title2.weight(.semibold))
-            Text(summary).font(.callout).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
-            Divider()
-            if let r = model.result {
-                Checklist(result: r).frame(maxHeight: 360)
-            } else {
-                Text(model.scanning ? "Scanning…" : "No scan yet").foregroundColor(.secondary)
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(bigNumber).font(.system(size: 30, weight: .light)).foregroundColor(Theme.ink)
+                Text("GB free").font(.system(size: 13)).foregroundColor(Theme.ink2)
+                Spacer()
+                Text(model.scanning ? "Scanning…" : "Arborist").font(.system(size: 11.5)).foregroundColor(Theme.ink2)
             }
-            Divider()
+            if let map = model.leafMap {
+                LeafMapView(map: map, freeBytes: model.freeBytes ?? 0, selection: $picked)
+            } else {
+                Text(model.scanning ? "Looking for repositories and worktrees…" : "No scan yet")
+                    .font(.system(size: 11)).foregroundColor(Theme.ink2).frame(width: 448, height: 120)
+            }
+            if let item = picked, item.kind != .free { SelectedRow(item: item) }
+            Key()
+            FreeBar(free: model.freeBytes ?? 0, total: model.result?.volume?.totalBytes ?? 0)
             HStack(spacing: 8) {
+                let n = model.leafMap?.staleCount ?? 0
+                Button(copied ? "Copied" : "Clear \(n)") {
+                    model.copy(model.staleCommands.joined(separator: "\n"))
+                    copied = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
+                }
+                .buttonStyle(DarkButtonStyle())
+                .disabled(n == 0)
+                .help("Read-only: copies \(n) `git worktree remove` commands for the stale worktrees. Nothing is deleted.")
                 Button(model.scanning ? "Scanning…" : "Rescan") { model.rescan() }.disabled(model.scanning)
-                Button("Reveal in Finder") { model.reveal(model.selection ?? ArboristConfig.home) }
+                Button(showList ? "Hide list" : "List") { showList.toggle() }
                 Spacer()
                 Button("Settings…") {
                     NSApp.activate(ignoringOtherApps: true)
@@ -28,15 +46,87 @@ struct PopoverView: View {
                 }
                 Button("Quit") { NSApp.terminate(nil) }
             }
-            .buttonStyle(PlainPillStyle())
+            .buttonStyle(.borderless)
+            .font(.system(size: 11))
+            .foregroundColor(Theme.ink2)
+            if showList, let r = model.result { Checklist(result: r).frame(maxHeight: 260) }
         }
-        .padding(14)
-        .frame(width: 420)
+        .padding(16)
+        .frame(width: 480)
+        .background(Theme.paper)
     }
 
-    private var summary: String {
-        guard let r = model.result else { return "Looking for repositories and worktrees in your scan folders." }
-        return Format.summarySentence(r)
+    private var bigNumber: String {
+        guard let f = model.freeBytes else { return "—" }
+        return String(format: "%.0f", Double(f) / 1e9)
+    }
+}
+
+/// The tapped leaf, with the v1 read-only actions.
+struct SelectedRow: View {
+    @EnvironmentObject var model: AppModel
+    let item: LeafItem
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(item.foldedCount > 0 ? "other (\(item.foldedCount) small items)" : item.name)
+                .font(.system(size: 11, weight: .medium)).foregroundColor(Theme.ink).lineLimit(1)
+            Text("\(Format.bytes(item.bytes)) · \(item.state.rawValue)").font(.system(size: 11)).foregroundColor(Theme.ink2)
+            Spacer()
+            if let p = item.path { Button("Reveal in Finder") { model.reveal(p) } }
+            if let cmd = item.removeCommand { Button("Copy remove command") { model.copy(cmd) }.help(cmd) }
+        }
+        .buttonStyle(.borderless).font(.system(size: 11)).foregroundColor(Theme.ink)
+    }
+}
+
+struct Key: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                ForEach([(LeafState.protected, "Protected"), (.clean, "Clean"), (.stale, "Stale"), (.deps, "Deps"), (.free, "Free")], id: \.1) { st, name in
+                    HStack(spacing: 5) {
+                        RoundedRectangle(cornerRadius: 2.5).fill(Color(hex: LeafPalette.fill(st))).frame(width: 9, height: 9)
+                        Text(name)
+                    }
+                }
+            }
+            HStack(spacing: 12) {
+                ForEach([(LeafKind.worktree, "Worktree"), (.main, "Main"), (.cache, "Cache"), (.deps, "Deps")], id: \.1) { _, name in
+                    Text(name)
+                }
+            }
+        }
+        .font(.system(size: 11)).foregroundColor(Theme.ink2)
+    }
+}
+
+struct FreeBar: View {
+    let free: Int64, total: Int64
+    var body: some View {
+        VStack(spacing: 5) {
+            GeometryReader { g in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Theme.line)
+                    Capsule().fill(Color(hex: LeafPalette.barFill))
+                        .frame(width: total > 0 ? g.size.width * (1 - Double(free) / Double(total)) : 0)
+                }
+            }.frame(height: 6)
+            HStack {
+                Text(Format.bytes(free)).fontWeight(.medium).foregroundColor(Theme.ink) + Text(" free").foregroundColor(Theme.ink2)
+                Spacer()
+                Text("of \(Format.bytes(total))").foregroundColor(Theme.ink2)
+            }.font(.system(size: 11))
+        }
+    }
+}
+
+struct DarkButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 12, weight: .medium))
+            .padding(.horizontal, 14).frame(height: 28)
+            .background(RoundedRectangle(cornerRadius: 7).fill(Color(hex: LeafPalette.button).opacity(configuration.isPressed ? 0.8 : 1)))
+            .foregroundColor(Color(hex: LeafPalette.labelOnDark))
     }
 }
 
