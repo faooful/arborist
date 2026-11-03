@@ -8,7 +8,7 @@ USAGE:
   arborist scan [--json] [--root PATH ...] [--max-depth N]
   arborist free [--json]
   arborist config            print the config file path and contents
-  arborist render [--sample|--busy|--from SCAN.json] [--filter NAME[,NAME]] [--state ready|uncommitted|clean|stale[,..]] [--hover N|PATH] --out FILE.svg   worktree leaf map as SVG (N: leaf drawn hovered)
+  arborist render [--sample|--busy|--from SCAN.json] [--filter NAME[,NAME]] [--state ready|uncommitted|clean|stale[,..]] [--hover N|PATH] [--repo-menu] --out FILE.svg   worktree leaf map as SVG (N: leaf drawn hovered)
   arborist render [--sample|--busy|--from SCAN.json] [--filter NAME[,NAME]] [--state S[,..]] --hover-sweep DIR   hover sweep: frame-NNN.svg + frames.json
   arborist render-stages --out FILE.svg        the four menu bar leaf stages as SVG
 
@@ -39,7 +39,7 @@ while i < args.count {
     case "--state" where i + 1 < args.count: stateArg = args[i + 1]; i += 1
     case "--filter" where i + 1 < args.count: filterNames = args[i + 1].split(separator: ",").map(String.init); i += 1
     case "--hover-sweep" where i + 1 < args.count: sweepDir = args[i + 1]; i += 1
-    case "--json", "--sample", "--busy": break
+    case "--json", "--sample", "--busy", "--repo-menu": break
     case "-h", "--help": print(usage); exit(0)
     default: FileHandle.standardError.write("unknown argument: \(args[i])\n\n\(usage)\n".data(using: .utf8)!); exit(2)
     }
@@ -85,21 +85,32 @@ case "render":
     // --hover N draws the Nth leaf hovered, with its card (for snapshots).
     // --hover N (leaf index) or --hover PATH (a worktree path).
     let hover = hoverArg.flatMap { a in Int(a).flatMap { $0 < map.leaves.count ? map.leaves[$0].item.id : nil } ?? map.leaves.first { $0.item.id == a }?.item.id }
+    // D26: the header's filter label, and --repo-menu draws the repo filter menu open (snapshot).
+    let filterLabel = HeaderLayout.filterLabel(visible.repos, repos: unfiltered.repos)
+    let menuRows = RepoMenuRow.rows(unfiltered.repos, filter: visible.repos)
     svg = LeafSVG.popover(r, map: map, note: sample ? "sample data · Linux render" : "Linux render", hover: hover,
-                          now: sample ? LeafSample.now : Date(), showAll: !states.isAll)
+                          now: sample ? LeafSample.now : Date(), showAll: !states.isAll, filterLabel: filterLabel,
+                          menu: args.contains("--repo-menu") ? menuRows : nil)
     if let dir = sweepDir {
         // Same HoverTracker path as the app's mouse tracking (D15): frame-NNN.svg plus frames.json.
         try! FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         var previous: String? = nil
         let frames = HoverSweep.run(map, space: LeafSVG.popoverSpace(map)) { i, t, p in
             let svg = LeafSVG.popover(r, map: map, note: "hover sweep · frame \(i)", hover: t.hovered, pinned: t.pinned,
-                                      now: sample ? LeafSample.now : Date(), pointer: p, showAll: !states.isAll)
+                                      now: sample ? LeafSample.now : Date(), pointer: p, showAll: !states.isAll, filterLabel: filterLabel)
             try! svg.write(toFile: dir + String(format: "/frame-%03d.svg", i), atomically: true, encoding: .utf8)
             defer { previous = t.strip }
             return LeafSVG.drawn(r, map: map, hover: t.hovered, pinned: t.pinned, now: sample ? LeafSample.now : Date(),
                                  showAll: !states.isAll, previousStrip: .some(previous))
         }
-        let report = HoverSweep.Report(frames, cases: LayoutCase.all(r, map: map, now: sample ? LeafSample.now : Date()))
+        // D26: the open repo menu snapshot, and the header as drawn for this scan.
+        try! LeafSVG.popover(r, map: map, note: "repo menu", now: sample ? LeafSample.now : Date(), showAll: !states.isAll,
+                             filterLabel: filterLabel, menu: menuRows)
+            .write(toFile: dir + "/menu.svg", atomically: true, encoding: .utf8)
+        let header = LeafSVG.header(r, filter: filterLabel, status: "").measures.map {
+            LegendMeasure(label: $0.label, natural: $0.natural, frame: Rect(x: $0.frame.x - PopoverLayout.padding, y: $0.frame.y, w: $0.frame.w, h: $0.frame.h))
+        }
+        let report = HoverSweep.Report(frames, cases: LayoutCase.all(r, map: map, now: sample ? LeafSample.now : Date()), header: header)
         try! HoverSweep.json(report).write(to: URL(fileURLWithPath: dir + "/frames.json"))
         print(report.summary)
         print("frames in \(dir)")

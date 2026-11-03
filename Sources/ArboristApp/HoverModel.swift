@@ -20,6 +20,9 @@ final class HoverModel: ObservableObject {
     /// D25: the resting panel's content frames and legend measures as drawn (popover coordinates).
     var drawnRestFrames: [Rect]?
     var drawnLegend: [LegendMeasure]?
+    /// D26: the header texts (natural width vs frame) and the open repo menu's frame, as drawn.
+    var drawnHeader: [LegendMeasure]?
+    var drawnRepoMenu: Rect?
     /// D25: the panel transition for the last published change: a crossfade only rest ↔ details;
     /// leaf → leaf swaps values instantly. SharedSlot animates from this, and the sweep records it.
     private(set) var panelTransition: PanelTransition = .none
