@@ -101,13 +101,14 @@ final class RepoFilterTests: XCTestCase, @unchecked Sendable {
         let paths = Set((a.worktrees + b.worktrees).map(\.path))
         for l in map.leaves { XCTAssertTrue(paths.contains(l.item.id), l.item.id) }
         XCTAssertNotNil(MapTransform.usable(map, into: Pt(PopoverLayout.mapWidth, PopoverLayout.mapHeight)))
-        let rep = HoverSweep.Report(HoverSweep.run(map, path: HoverSweep.path(in: map, rows: 5, perRow: 30),
-                                                   space: LeafSVG.cardSpace(map)))
+        let rep = HoverSweep.Report(HoverSweep.run(map, space: LeafSVG.popoverSpace(map), rows: 5, perRow: 30))
         XCTAssertEqual(rep.mismatches, 0, rep.summary)
-        XCTAssertEqual(rep.cardClipped, 0, rep.summary)
+        XCTAssertEqual(rep.stripMismatches, 0, rep.summary)
+        XCTAssertEqual(rep.tooltipClipped, 0, rep.summary)
+        XCTAssertEqual(rep.reachFailures, 0, rep.summary)
     }
 
-    /// The real CLI with --filter: 0 mismatches and no clipped cards.
+    /// The real CLI with --filter: 0 mismatches, no strip mismatches, no clipped tooltips, the pin holds.
     func testCLISweepWithFilter() throws {
         let bin = try XCTUnwrap(HoverSweepTruthTests.cliBinary())
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("fsweep-\(UUID().uuidString)")
@@ -120,87 +121,84 @@ final class RepoFilterTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(p.terminationStatus, 0)
         let r = try JSONDecoder().decode(HoverSweep.Report.self, from: Data(contentsOf: dir.appendingPathComponent("frames.json")))
         XCTAssertEqual(r.mismatches, 0, r.summary)
-        XCTAssertEqual(r.cardClipped, 0, r.summary)
+        XCTAssertEqual(r.stripMismatches, 0, r.summary)
+        XCTAssertEqual(r.tooltipClipped, 0, r.summary)
+        XCTAssertEqual(r.reachFailures, 0, r.summary)
         XCTAssertGreaterThan(r.hoveredCount, 0)
         let shown = Set((a.worktrees + b.worktrees).map(\.path))
         for f in r.frames { if let h = f.hovered { XCTAssertTrue(shown.contains(h), h) } }
     }
 }
 
-/// D19: the hover card is placed against the whole popover and always fits.
-final class CardPlacementTests: XCTestCase, @unchecked Sendable {
-    let bounds = Pt(480, 560), size = LeafSVG.cardSlot
+/// D22: the tooltip follows the pointer 12 pt off, flips at the edges and always stays inside the popover.
+final class TooltipPlacementTests: XCTestCase, @unchecked Sendable {
+    let bounds = Pt(480, 600), size = TooltipPlacement.size
 
     func inside(_ o: Pt) -> Bool { Rect(x: o.x, y: o.y, w: size.x, h: size.y).inside(width: bounds.x, height: bounds.y) }
 
-    func testBelowWhenThereIsRoom() {
-        let leaf = Rect(x: 100, y: 60, w: 40, h: 30)
-        let o = CardPlacement.place(leaf: leaf, size: size, in: bounds)
-        XCTAssertGreaterThanOrEqual(o.y, leaf.y + leaf.h)
+    func testOffsetBelowRight() {
+        XCTAssertEqual(TooltipPlacement.place(pointer: Pt(100, 100), in: bounds), Pt(112, 112))
+    }
+
+    func testFlipsAtTheRightAndBottom() {
+        let p = Pt(470, 590), o = TooltipPlacement.place(pointer: p, in: bounds)
+        XCTAssertEqual(o, Pt(470 - 12 - size.x, 590 - 12 - size.y))
         XCTAssertTrue(inside(o))
     }
 
-    func testFlipsAboveNearTheBottom() {
-        let leaf = Rect(x: 200, y: 470, w: 60, h: 40)   // no room below, nor beside (card is 264 wide)
-        let o = CardPlacement.place(leaf: leaf, size: size, in: bounds)
-        XCTAssertLessThanOrEqual(o.y + size.y, leaf.y)
-        XCTAssertTrue(inside(o))
-    }
-
-    func testClampsAtTheEdges() {
-        for leaf in [Rect(x: 0, y: 0, w: 10, h: 10), Rect(x: 470, y: 0, w: 10, h: 10), Rect(x: 0, y: 550, w: 10, h: 10),
-                     Rect(x: 470, y: 550, w: 10, h: 10), Rect(x: -50, y: 200, w: 30, h: 30), Rect(x: 460, y: 300, w: 60, h: 20)] {
-            let o = CardPlacement.place(leaf: leaf, size: size, in: bounds)
-            XCTAssertGreaterThanOrEqual(o.x, CardPlacement.margin - 0.001, "\(leaf)")
-            XCTAssertGreaterThanOrEqual(o.y, CardPlacement.margin - 0.001, "\(leaf)")
-            XCTAssertLessThanOrEqual(o.x + size.x, bounds.x - CardPlacement.margin + 0.001, "\(leaf)")
-            XCTAssertLessThanOrEqual(o.y + size.y, bounds.y - CardPlacement.margin + 0.001, "\(leaf)")
-        }
-    }
-
-    func testAlwaysFitsOnAGrid() {
-        for x in stride(from: -20.0, through: 480, by: 23) {
-            for y in stride(from: -20.0, through: 560, by: 23) {
-                for (w, h) in [(8.0, 8.0), (60.0, 40.0), (200.0, 150.0)] {
-                    XCTAssertTrue(inside(CardPlacement.place(leaf: Rect(x: x, y: y, w: w, h: h), size: size, in: bounds)), "\(x),\(y)")
-                }
+    func testAlwaysInsideAndNeverUnderThePointer() {
+        for x in stride(from: 0.0, through: 480, by: 7) {
+            for y in stride(from: 0.0, through: 600, by: 7) {
+                let o = TooltipPlacement.place(pointer: Pt(x, y), in: bounds)
+                XCTAssertTrue(inside(o), "\(x),\(y)")
+                XCTAssertFalse(Rect(x: o.x, y: o.y, w: size.x, h: size.y).contains(Pt(x, y)), "\(x),\(y)")
             }
         }
     }
 
-    func testKeepsCurrentWhileItFits() {
-        let cur = Pt(200, 300)
-        XCTAssertEqual(CardPlacement.place(leaf: Rect(x: 20, y: 20, w: 30, h: 30), size: size, in: bounds, current: cur), cur)
-    }
-
-    /// The slot covers the tallest card, including the app's Remove row.
-    func testSlotCoversEveryRow() {
-        let r = LeafSample.busy
-        for ref in WorktreeList.sorted(r) {
-            XCTAssertLessThanOrEqual(LeafSVG.cardHeight(HoverCard(ref)) + LeafSVG.appCardExtra, LeafSVG.cardSlot.y + 0.001)
-        }
-    }
-
-    /// The busy map in the real popover space: the card is never clipped, also with the map scaled.
-    func testSweepNeverClipsTheCard() {
+    /// The busy map in the real popover space, also scaled: tooltip never clipped, strip always right.
+    func testSweepNeverClipsTheTooltip() {
         let r = LeafSample.busy
         let map = LeafLayout.layout(LeafLayout.groups(from: r), staleCount: r.totals.staleWorktrees)
-        for space in [LeafSVG.cardSpace(map),
-                      CardSpace(mapOrigin: Pt(16, 52), size: Pt(480, 560), transform: .fit(map, into: Pt(448, 400)))] {
-            let rep = HoverSweep.Report(HoverSweep.run(map, path: HoverSweep.path(in: map, rows: 9, perRow: 40),
-                                                       transform: space.transform, space: space))
-            XCTAssertEqual(rep.cardClipped, 0, rep.summary)
+        let app = PopoverSpace(mapOrigin: Pt(16, 52), size: Pt(480, 52 + 400 + PopoverLayout.stripGap + PopoverLayout.stripHeight + 110),
+                               transform: .fit(map, into: Pt(448, 400)))
+        for space in [LeafSVG.popoverSpace(map), app] {
+            let rep = HoverSweep.Report(HoverSweep.run(map, transform: space.transform, space: space, rows: 9, perRow: 40))
+            XCTAssertEqual(rep.tooltipClipped, 0, rep.summary)
             XCTAssertEqual(rep.mismatches, 0, rep.summary)
-            XCTAssertTrue(rep.frames.contains { $0.cardRect != nil })
+            XCTAssertEqual(rep.stripMismatches, 0, rep.summary)
+            XCTAssertEqual(rep.reachFailures, 0, rep.summary)
+            XCTAssertGreaterThan(rep.tooltipFrames, 100)
         }
     }
 
-    /// Without a space (old map-only anchoring) a card taller than the map would be reported clipped.
+    /// A popover too small for the tooltip is reported as clipped.
     func testClippedIsDetected() {
         let r = LeafSample.busy
         let map = LeafLayout.layout(LeafLayout.groups(from: r), staleCount: r.totals.staleWorktrees)
-        let tiny = CardSpace(mapOrigin: Pt(0, 0), size: Pt(map.width, 100))
-        let rep = HoverSweep.Report(HoverSweep.run(map, path: HoverSweep.path(in: map), space: tiny))
-        XCTAssertGreaterThan(rep.cardClipped, 0)
+        let tiny = PopoverSpace(mapOrigin: Pt(0, 0), size: Pt(150, 40))
+        XCTAssertGreaterThan(HoverSweep.Report(HoverSweep.run(map, space: tiny)).tooltipClipped, 0)
+    }
+}
+
+/// D22: the docked strip and its fixed button frames.
+final class StripLayoutTests: XCTestCase, @unchecked Sendable {
+    func testStripSitsBelowTheMapInsideThePopover() {
+        let s = PopoverSpace(mapOrigin: Pt(16, 52), size: Pt(480, 700))
+        XCTAssertEqual(s.stripRect, Rect(x: 16, y: 52 + 400 + PopoverLayout.stripGap, w: 448, h: PopoverLayout.stripHeight))
+        for b in StripLayout.buttons(in: s.stripRect) {
+            XCTAssertTrue(b.rect.x >= s.stripRect.x && b.rect.x + b.rect.w <= s.stripRect.x + s.stripRect.w, b.name)
+            XCTAssertTrue(b.rect.y >= s.stripRect.y && b.rect.y + b.rect.h <= s.stripRect.y + s.stripRect.h, b.name)
+            XCTAssertEqual(StripLayout.button(at: b.rect.center, in: s.stripRect), b.name)
+        }
+        XCTAssertNil(StripLayout.button(at: Pt(0, 0), in: s.stripRect))
+    }
+
+    func testReachFailureWhenThePinIsLost() {
+        var f = HoverSweep.Frame(frame: 0, x: 0, y: 0, t: 0, hovered: nil, pinned: nil, strip: nil)
+        f.reachTarget = true; f.pinTruth = "a"; f.buttonUnderPointer = "Reveal in Finder"
+        XCTAssertTrue(f.isReachFailure)
+        f.pinned = "a"; f.strip = "a"
+        XCTAssertFalse(f.isReachFailure)
     }
 }

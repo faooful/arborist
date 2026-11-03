@@ -1,7 +1,7 @@
 @testable import ArboristCore
 import XCTest
 
-/// D15: nearest-cell hit-testing, the grace period, the stable card anchor, the pin, and the sweep hook.
+/// D15/D22: nearest-cell hit-testing, the grace period, the pin, and the sweep hook.
 final class HoverCalmTests: XCTestCase, @unchecked Sendable {
     let map: LeafMap = {
         let r = LeafSample.busy
@@ -25,8 +25,8 @@ final class HoverCalmTests: XCTestCase, @unchecked Sendable {
                     t.move(to: p, in: map, at: f)
                     XCTAssertNotNil(t.hovered, "nil at \(p) between \(a.item.id) and \(b.item.id)")
                 }
-                // D20: the switch lands once the corridor's grace and the dwell have passed.
-                rest(&t, at: b.centroid, in: map, from: 1)
+                // D22: no corridor or dwell: at b the hover is b at once.
+                t.move(to: b.centroid, in: map, at: 1)
                 XCTAssertEqual(t.hovered, b.item.id)
                 break
             }
@@ -56,7 +56,7 @@ final class HoverCalmTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(t.hovered, a.item.id)
         t.exit(at: 6)
         XCTAssertTrue(t.settle(at: 6 + HoverTracker.leaveDelay))
-        XCTAssertNil(t.hovered); XCTAssertNil(t.card); XCTAssertNil(t.cardOrigin)
+        XCTAssertNil(t.hovered); XCTAssertNil(t.strip); XCTAssertNil(t.tooltipOrigin)
         XCTAssertLessThanOrEqual(HoverTracker.leaveDelay, 0.1)
     }
 
@@ -65,83 +65,45 @@ final class HoverCalmTests: XCTestCase, @unchecked Sendable {
         var t = HoverTracker()
         t.move(to: a.centroid, in: map, at: 0)
         // A point that hits nothing doesn't clear at once: only after the grace (D16).
-        XCTAssertFalse(t.move(to: Pt(-40, -40), in: map, at: 0.1))
+        t.move(to: Pt(-40, -40), in: map, at: 0.1)
         XCTAssertEqual(t.hovered, a.item.id)
     }
 
-    /// Across a full serpentine sweep the card moves to a new corner only a few times, and never between
-    /// two consecutive frames twice in a row.
-    func testAnchorStaysStableAcrossASweep() {
-        let frames = HoverSweep.run(map, path: HoverSweep.path(in: map))
-        let shown = frames.filter(\.cardShown)
-        let origins = shown.map { Pt($0.cardX!, $0.cardY!) }
-        let moves = zip(origins, origins.dropFirst()).filter { $0 != $1 }.count
-        let hoverChanges = zip(shown, shown.dropFirst()).filter { $0.hovered != $1.hovered }.count
-        XCTAssertGreaterThan(hoverChanges, 10, "the sweep crossed many leaves (D20 holds the card in the corridor)")
-        XCTAssertLessThanOrEqual(moves, 4, "card stays anchored across the sweep")
-        // The first row (top half) keeps one slot the whole way.
-        XCTAssertEqual(Set(origins.prefix(14).map { "\($0.x),\($0.y)" }).count, 1)
-        // D16: hover matches the ground truth everywhere (cleared in far gaps after the grace).
-        XCTAssertTrue(frames.allSatisfy { !$0.isMismatch })
+    /// D22: across a serpentine sweep the hover follows the leaf under the pointer every frame.
+    func testSweepFollowsThePointer() {
+        let frames = HoverSweep.run(map)
+        let changes = zip(frames, frames.dropFirst()).filter { $0.hovered != $1.hovered }.count
+        XCTAssertGreaterThan(changes, 10)
+        XCTAssertTrue(frames.allSatisfy { !$0.isMismatch && !$0.isStripMismatch })
         XCTAssertNil(frames.last?.hovered)
     }
 
-    func testAnchorKeepsCurrentWhenClear() {
-        let size = Pt(100, 80), bounds = Pt(448, 400)
-        let first = HoverTracker.anchor(current: nil, leaf: Rect(x: 20, y: 20, w: 40, h: 40), size: size, in: bounds)
-        XCTAssertEqual(first, Pt(448 - 100 - 6, 400 - 80 - 6), "corner away from the leaf")
-        XCTAssertEqual(HoverTracker.anchor(current: first, leaf: Rect(x: 120, y: 30, w: 40, h: 40), size: size, in: bounds), first)
-        let moved = HoverTracker.anchor(current: first, leaf: Rect(x: 330, y: 300, w: 40, h: 40), size: size, in: bounds)
-        XCTAssertNotEqual(moved, first, "moves only when the leaf comes near")
-    }
-
-    /// The lift is drawing only. Two touching squares: with A lifted to 1.03×, its drawing reaches 1.5 pt
-    /// into B. A point there hovers B, because hit-testing uses the unscaled layout outlines.
-    func testHitTestIgnoresScale() throws {
-        let s = LeafPalette.hoverScale
-        var a = map.leaves[0], b = map.leaves[1]
-        a.outline = [Pt(0, 0), Pt(100, 0), Pt(100, 100), Pt(0, 100)]; a.centroid = Pt(50, 50)
-        b.outline = [Pt(100.5, 0), Pt(200, 0), Pt(200, 100), Pt(100.5, 100)]; b.centroid = Pt(150, 50)
-        var m = map
-        m.leaves = [a, b]
-        let p = Pt(101.2, 50)
-        let liftedEdge = 50 + 50 * s
-        XCTAssertLessThan(p.x, liftedEdge, "p is under A's lifted drawing")
-        var t = HoverTracker()
-        t.move(to: a.centroid, in: m, at: 0)
-        XCTAssertEqual(t.appearance(of: a.item.id, reduceMotion: false).scale, s)
-        rest(&t, at: p, in: m, from: 0.02)
-        XCTAssertEqual(t.hovered, b.item.id)
-        // And the gutter just outside A still belongs to A (nearest edge), not to nothing.
-        rest(&t, at: a.centroid, in: m, from: 1)
-        rest(&t, at: Pt(100.2, 50), in: m, from: 2)
-        XCTAssertEqual(t.hovered, a.item.id)
-    }
-
-    func testClickPinsAndPauseHover() throws {
+    /// D22: a click pins the strip; hover still moves; clicking it again, empty space or Esc unpins.
+    func testClickPinsButHoverStillMoves() throws {
         let a = map.leaves[0], b = try XCTUnwrap(map.leaves.first { Geo.distance($0.centroid, toOutline: a.outline) > 40 })
         var t = HoverTracker()
         t.move(to: a.centroid, in: map, at: 0)
-        XCTAssertTrue(t.click(at: a.centroid, in: map)); XCTAssertTrue(t.pinned)
-        XCTAssertFalse(t.move(to: b.centroid, in: map, at: 0.1)); XCTAssertEqual(t.card, a.item.id)
-        t.exit(at: 0.2); XCTAssertFalse(t.settle(at: 5), "a pinned card stays")
-        if let r = t.cardRect { XCTAssertFalse(t.click(at: Pt(r.x + 5, r.y + 5), in: map), "clicks on the pinned card are its own") }
-        XCTAssertTrue(t.click(at: a.centroid, in: map)); XCTAssertFalse(t.pinned)
-        rest(&t, at: b.centroid, in: map, from: 6); XCTAssertEqual(t.hovered, b.item.id)
-        t.reset(); XCTAssertNil(t.hovered); XCTAssertFalse(t.pinned)
+        XCTAssertTrue(t.click(at: a.centroid, in: map)); XCTAssertEqual(t.pinned, a.item.id)
+        XCTAssertTrue(t.move(to: b.centroid, in: map, at: 0.1))
+        XCTAssertEqual(t.hovered, b.item.id, "hover still follows the pointer")
+        XCTAssertEqual(t.strip, a.item.id, "the strip keeps the pinned leaf")
+        XCTAssertEqual(t.appearance(of: a.item.id).ring, LeafPalette.ringPinned)
+        XCTAssertEqual(t.appearance(of: b.item.id).ring, LeafPalette.ringHover)
+        XCTAssertNotNil(t.tooltipOrigin)
+        t.exit(at: 0.2); XCTAssertTrue(t.settle(at: 5)); XCTAssertNil(t.hovered)
+        XCTAssertEqual(t.pinned, a.item.id, "a pin survives leaving the map"); XCTAssertNil(t.tooltipOrigin)
+        t.click(at: a.centroid, in: map); XCTAssertNil(t.pinned, "clicking the pinned leaf unpins")
+        t.click(at: b.centroid, in: map); XCTAssertEqual(t.pinned, b.item.id, "clicking another leaf moves the pin")
+        t.click(at: Pt(-500, -500), in: map); XCTAssertNil(t.pinned, "empty space unpins")
+        t.click(at: a.centroid, in: map); t.unpin(); XCTAssertNil(t.pinned, "Esc unpins")
+        XCTAssertEqual(t.hovered, a.item.id, "Esc keeps the hover")
+        t.reset(); XCTAssertNil(t.hovered); XCTAssertNil(t.pinned)
     }
 
     func testFramesJSONWritesNull() throws {
-        let frames = HoverSweep.run(map, path: [Pt(-500, -500), nil])
+        let frames = HoverSweep.run(map)
         let s = String(decoding: HoverSweep.json(frames), as: UTF8.self)
         XCTAssertTrue(s.contains("\"hovered\" : null"))
-        XCTAssertTrue(s.contains("\"cardShown\" : false"))
-    }
-
-    /// D20: rest the pointer at `p` long enough for the corridor's grace and the switch dwell to pass.
-    private func rest(_ t: inout HoverTracker, at p: Pt, in m: LeafMap, from t0: Double) {
-        t.move(to: p, in: m, at: t0)
-        t.move(to: p, in: m, at: t0 + HoverTracker.cardGrace + 0.01)
-        t.settle(at: t0 + HoverTracker.cardGrace + HoverTracker.switchDwell + 0.02)
+        XCTAssertTrue(s.contains("\"tooltipClipped\" : false"))
     }
 }

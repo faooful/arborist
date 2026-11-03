@@ -58,50 +58,37 @@ final class DeclutterLayoutTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testCardNeverCoversTheHoveredLeafWhenThereIsRoom() {
-        let m = busy
-        for l in m.leaves {
-            let (x0, y0, x1, y1) = Geo.bbox(l.outline)
-            let leaf = Rect(x: x0, y: y0, w: x1 - x0, h: y1 - y0)
-            let size = Pt(LeafSVG.cardWidth, 190)
-            let o = LeafSVG.cardOrigin(avoiding: leaf, size: size, in: Pt(m.width, m.height))
-            let card = Rect(x: o.x, y: o.y, w: size.x, h: size.y)
-            XCTAssertTrue(card.inside(width: m.width, height: m.height))
-            let g = 14.0
-            let roomX = leaf.x >= size.x + g || leaf.x + leaf.w <= m.width - size.x - g
-            let roomY = leaf.y >= size.y + g || leaf.y + leaf.h <= m.height - size.y - g
-            if roomX || roomY { XCTAssertFalse(card.intersects(leaf), l.item.name) }
-        }
-    }
 }
 
 final class HoverTrackerTests: XCTestCase, @unchecked Sendable {
     func testEnterMoveLeaveWithDebounce() {
         var h = HoverTracker()
         XCTAssertTrue(h.pointer("a", at: 0))
-        XCTAssertEqual(h.hovered, "a"); XCTAssertEqual(h.card, "a")
-        // Crossing a gutter to a neighbour: no flicker, the card goes straight to b.
+        XCTAssertEqual(h.hovered, "a"); XCTAssertEqual(h.strip, "a")
+        // Crossing a gutter to a neighbour: no flicker, the strip goes straight to b.
         XCTAssertFalse(h.pointer(nil, at: 0.30))
         XCTAssertEqual(h.hovered, "a"); XCTAssertNotNil(h.clearAt)
         XCTAssertTrue(h.pointer("b", at: 0.35))
-        XCTAssertEqual(h.card, "b"); XCTAssertNil(h.clearAt)
+        XCTAssertEqual(h.strip, "b"); XCTAssertNil(h.clearAt)
         XCTAssertFalse(h.settle(at: 1), "nothing pending")
         // Real leave: clears only after the delay.
         h.pointer(nil, at: 2)
         XCTAssertFalse(h.settle(at: 2.05)); XCTAssertEqual(h.hovered, "b")
         XCTAssertTrue(h.settle(at: 2 + HoverTracker.leaveDelay))
-        XCTAssertNil(h.hovered); XCTAssertNil(h.card)
+        XCTAssertNil(h.hovered); XCTAssertNil(h.strip)
         XCTAssertFalse(h.pointer(nil, at: 3), "leaving when nothing is hovered changes nothing")
     }
 
     func testAppearanceAndReduceMotion() {
         var h = HoverTracker()
-        XCTAssertEqual(h.appearance(of: "x", reduceMotion: false).opacity, 1)
+        XCTAssertEqual(h.appearance(of: "x").opacity, 1); XCTAssertEqual(h.appearance(of: "x").ring, 0)
         h.pointer("a", at: 0)
-        XCTAssertEqual(h.appearance(of: "a", reduceMotion: false).scale, 1.03, accuracy: 1e-9)
-        XCTAssertEqual(h.appearance(of: "a", reduceMotion: true).scale, 1)
-        XCTAssertEqual(h.appearance(of: "b", reduceMotion: false).opacity, 0.88, accuracy: 1e-9)
-        XCTAssertEqual(h.appearance(of: "b", reduceMotion: false).scale, 1)
+        XCTAssertEqual(h.appearance(of: "a").ring, 2, "D22: a 2 pt ring on the hovered leaf")
+        XCTAssertEqual(h.appearance(of: "a").opacity, 1)
+        XCTAssertEqual(h.appearance(of: "b").opacity, LeafPalette.dimOthers)
+        XCTAssertGreaterThanOrEqual(LeafPalette.dimOthers, 0.9, "others are dimmed only slightly")
+        XCTAssertGreaterThan(LeafPalette.ringPinned, LeafPalette.ringHover)
+        XCTAssertEqual(HoverTracker.duration(reduceMotion: true), 0)
         XCTAssertGreaterThanOrEqual(HoverTracker.duration(reduceMotion: false), 0.15)
         XCTAssertLessThanOrEqual(HoverTracker.duration(reduceMotion: false), 0.2)
     }

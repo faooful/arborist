@@ -3,7 +3,7 @@ import AppKit
 import ArboristCore
 import SwiftUI
 
-/// `--hover-sweep DIR` test hook (D15), DEBUG builds only, and only with ARBORIST_HOVER_SWEEP=1 set.
+/// `--hover-sweep DIR` and `--action-check` test hooks (D15, D22), DEBUG builds only, and only with ARBORIST_HOVER_SWEEP=1 set.
 ///
 /// It loads the scan cache (or runs one scan), then sweeps the pointer across the map through
 /// `HoverModel.move`/`exit`, the same calls the NSTrackingArea makes. After each step it renders the real
@@ -45,7 +45,6 @@ enum HoverSweepRunner {
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
 
         let hover = model.hover
-        hover.setCardSize(LeafSVG.cardSlot)
         hover.instant = true // no animations: every frame shows its settled state
 
         // The real view, hosted like the popover: NSHostingView in an offscreen borderless window.
@@ -57,6 +56,7 @@ enum HoverSweepRunner {
         window.contentView = host
         window.orderFrontRegardless() // offscreen; needed so AppKit lays out and draws the hosted views
         settle(host)
+        let sizeBefore = host.fittingSize
 
         // The map view's real frame and transform, as laid out (not a guess): the tracking view is the
         // map's frame, and LeafMapView has published the transform it draws with.
@@ -64,56 +64,97 @@ enum HoverSweepRunner {
         let transform = hover.transform
         let mapFrame = tracking.convert(tracking.bounds, to: host)
         print("map view frame in popover: \(mapFrame), transform: \(transform)")
-        // D19: the card is placed and checked against the real popover (AppKit's layout, not a guess).
+        // D22: the tooltip and strip are checked against the real popover (AppKit's layout, not a guess).
         let y0 = host.isFlipped ? mapFrame.minY : host.bounds.height - mapFrame.maxY
-        hover.setSpace(CardSpace(mapOrigin: Pt(mapFrame.minX, y0), size: Pt(host.bounds.width, host.bounds.height), transform: transform))
-        print("card space: \(hover.tracker.space.map { "\($0)" } ?? "none")")
+        hover.setSpace(PopoverSpace(mapOrigin: Pt(mapFrame.minX, y0), size: Pt(host.bounds.width, host.bounds.height), transform: transform))
+        print("popover space: \(hover.tracker.space.map { "\($0)" } ?? "none")")
 
-        let path = HoverSweep.path(in: map)
+        // D22: the same steps as the CLI: serpentine, pin + reach to a strip button, leave.
+        let space = hover.tracker.space!
+        let (steps, pinLeaf) = HoverSweep.steps(map, space: space)
+        let reachAt = steps.lastIndex { if case .move = $0 { return true }; return false }
         var frames: [HoverSweep.Frame] = []
-        var t = 0.0, last = Pt(-1, -1)
-        // D20 reach path: simulated time (captures are slow), so the corridor's grace is judged per frame.
-        var simBase: Double?
-        func feed(_ p: Pt?, reachTarget: Bool) {
-            let i = frames.count, before = hover.tracker.cardOrigin
-            if let p {
-                last = p
-                let vp = transform.toView(p)
-                if let b = simBase {
-                    hover.pointer(view: CGPoint(x: vp.x, y: vp.y), in: map, at: b + t, animated: false)
-                } else {
+        var t = 0.0, last = Pt(-1, -1), pinTruth: String?
+        for (i, step) in steps.enumerated() {
+            var p: Pt?
+            switch step {
+            case .move(let q):
+                p = q; last = q
+                let vp = transform.toView(q)
+                if HoverSweep.onMap(q, map) {
                     // A view point delivered the way mouseMoved delivers it: through the tracking view's callback.
                     tracking.onMove(CGPoint(x: vp.x, y: vp.y))
+                } else {
+                    tracking.onExit() // the pointer left the map's tracking area (onto the strip)
                 }
-            } else {
-                simBase = nil
-                hover.exitCard(at: t)
-                hover.exit(at: t, animated: false)
-                hover.settle(at: t, animated: false)
+            case .click(let q):
+                p = q; last = q
+                let vp = transform.toView(q)
+                hover.click(view: CGPoint(x: vp.x, y: vp.y), in: map)
+                pinTruth = pinTruth == nil ? pinLeaf : nil
+            case .leave:
+                tracking.onExit()
             }
-            // Instant mode (D16, D20): apply a pending clear or leaf switch right away.
-            if let c = hover.tracker.nextDeadline { hover.settle(at: max(c, simBase.map { $0 + t } ?? HoverModel.now()), animated: false) }
+            // Instant mode (D16): apply a pending clear right away.
+            if let c = hover.tracker.clearAt { hover.settle(at: max(c, HoverModel.now()), animated: false) }
             settle(host)
             frames.append(HoverSweep.frame(i, pointer: p, last: last, t: t, tracker: hover.tracker, map: map, transform: transform,
-                                           placedNow: hover.tracker.cardOrigin != before, reachTarget: reachTarget))
+                                           pinTruth: pinTruth, reachTarget: i == reachAt))
             let marker = p.map { tracking.convert(CGPoint(x: transform.toView($0).x, y: transform.toView($0).y), to: host) }
             capture(host, marker: marker, to: dir + String(format: "/frame-%03d.png", i))
             t += p == nil ? HoverTracker.leaveDelay + 0.01 : 1.0 / 30
+            // D22: the popover never resizes on hover.
+            if host.fittingSize != sizeBefore { fail("popover resized on hover: \(sizeBefore) → \(host.fittingSize) at frame \(i)") }
         }
-        let leaveAt = path.firstIndex { $0 == nil } ?? path.count
-        for p in path[..<leaveAt] { feed(p, reachTarget: false) }
-        // D20: reach into the card and end on a button, then leave.
-        simBase = HoverModel.now() + 1 - t
-        if hover.tracker.card == nil, let l = map.leaves.first { feed(l.centroid, reachTarget: false) }
-        let reach = HoverSweep.reachPath(hover.tracker)
-        for (k, p) in reach.enumerated() { feed(p, reachTarget: k == reach.count - 1) }
-        for p in path[leaveAt...] { feed(p, reachTarget: false) }
         let report = HoverSweep.Report(frames)
         do { try HoverSweep.json(report).write(to: URL(fileURLWithPath: dir + "/frames.json")) } catch { fail("\(error)") }
         precondition(model.pendingCleanup == nil && model.cleanupResults == nil && !model.cleaning, "cleanup must not run")
         window.orderOut(nil)
         print(report.summary)
         print("frames in \(dir)")
+    }
+
+    /// `--action-check` (D22): runs Settings, Quit (dry run), Rescan and List through the real router and
+    /// AppModel, and logs what fired. Settings logs whether a Settings window appeared and became key / front.
+    /// Never quits; cleanup disabled; no menu bar item (the App scene isn't created, so Settings uses the
+    /// fallback window unless the selector finds a Settings scene).
+    static func actionCheck() {
+        let limit = deadlineSeconds
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + limit) {
+            FileHandle.standardError.write(Data("action-check: timed out after \(Int(limit)) s\n".utf8))
+            exit(2)
+        }
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.accessory) // like the menu bar app; never a status item here
+        let scan = ScanCache.load() ?? Scanner(config: ArboristConfig.load()).scan()
+        let model = AppModel(sweepWith: scan)
+        precondition(model.cleanupDisabled, "action-check must run with cleanup disabled")
+        let router = model.router
+        precondition(router.dryRunQuit, "hook mode must never quit")
+        func log(_ s: String) { print("action-check: " + s) }
+
+        log(router.perform(.quit).log)
+        let list0 = model.showList
+        log(router.perform(.list).log + " (showList \(list0) → \(model.showList))")
+        router.perform(.list)
+        let r = router.perform(.rescan)
+        log(r.log + " (scanning=\(model.scanning), progress=\(model.progressLabel ?? "none"))")
+        log(router.perform(.rescan).log + " (second tap while scanning)")
+
+        var done = false
+        SettingsOpener.shared.run(SettingsOpening.steps(osMajor: router.osMajor), model: model) { report in
+            log("settings: fired; " + report)
+            done = true
+        }
+        let until = Date().addingTimeInterval(5)
+        while !done && Date() < until { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+        if !done { log("settings: no report within 5 s") }
+        // Let the rescan finish (or time out) so its progress is logged too; it never writes the cache here.
+        let scanUntil = Date().addingTimeInterval(40)
+        while model.scanning && Date() < scanUntil { RunLoop.current.run(until: Date().addingTimeInterval(0.1)) }
+        log("rescan finished=\(!model.scanning), repos=\(model.scanned?.repos.count ?? 0), cached=\(model.resultIsCached)")
+        precondition(model.pendingCleanup == nil && model.cleanupResults == nil && !model.cleaning, "cleanup must not run")
+        log(done ? "done" : "done (settings unverified)")
     }
 
     /// `--snapshot PNG` (D17): the popover in the cached + scanning state, hosted and sized the way the

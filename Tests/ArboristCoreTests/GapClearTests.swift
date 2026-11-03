@@ -31,7 +31,7 @@ final class GapClearTests: XCTestCase, @unchecked Sendable {
         t.move(to: Pt(gap.x + 0.5, gap.y), in: map, at: 1 + HoverTracker.leaveDelay / 2)
         XCTAssertEqual(t.clearAt, 1 + HoverTracker.leaveDelay, "moving inside the gap doesn't postpone the clear")
         XCTAssertTrue(t.settle(at: 1 + HoverTracker.leaveDelay))
-        XCTAssertNil(t.hovered); XCTAssertNil(t.card)
+        XCTAssertNil(t.hovered); XCTAssertNil(t.strip)
         // A later move in the gap also applies it without a timer.
         var u = HoverTracker()
         u.move(to: leaf.centroid, in: map, at: 0); u.move(to: gap, in: map, at: 1)
@@ -70,19 +70,18 @@ final class GapClearTests: XCTestCase, @unchecked Sendable {
         let (gap, leaf) = try farGap()
         var t = HoverTracker()
         t.move(to: leaf.centroid, in: map, at: 0)
-        XCTAssertTrue(t.click(at: leaf.centroid, in: map)); XCTAssertTrue(t.pinned)
+        XCTAssertTrue(t.click(at: leaf.centroid, in: map)); XCTAssertEqual(t.pinned, leaf.item.id)
         t.move(to: gap, in: map, at: 1)
-        XCTAssertNil(t.clearAt)
-        XCTAssertFalse(t.settle(at: 9))
-        XCTAssertEqual(t.card, leaf.item.id)
+        XCTAssertTrue(t.settle(at: 9))
+        XCTAssertNil(t.hovered, "D22: the hover clears, the pin holds the strip")
+        XCTAssertEqual(t.strip, leaf.item.id)
         t.click(at: leaf.centroid, in: map) // unpin
-        t.move(to: gap, in: map, at: 10)
-        XCTAssertTrue(t.settle(at: 10 + HoverTracker.leaveDelay))
-        XCTAssertNil(t.card)
+        XCTAssertNil(t.pinned)
+        XCTAssertEqual(t.strip, t.hovered, "unpinned: the strip follows the hover again")
     }
 
     func testSweepExpectsNullInFarGaps() {
-        let r = HoverSweep.Report(HoverSweep.run(map, path: HoverSweep.path(in: map, rows: 7, perRow: 40)))
+        let r = HoverSweep.Report(HoverSweep.run(map, rows: 7, perRow: 40))
         XCTAssertEqual(r.mismatches, 0, r.summary)
         let far = r.frames.filter { $0.inGap && $0.snappedTo == nil }
         XCTAssertFalse(far.isEmpty)

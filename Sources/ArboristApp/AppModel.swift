@@ -31,6 +31,8 @@ final class AppModel: ObservableObject {
     @Published var freeBytes: Int64?
     @Published var config = ArboristConfig.load()
     @Published var selection: String?   // path of the selected repo/worktree/cache
+    /// The worktree list under the popover (List / Hide list), toggled through the action router (D22).
+    @Published var showList = false
     private var timer: Timer?
     private var notifiedLow = false
     private var scanID = 0
@@ -207,7 +209,8 @@ final class AppModel: ObservableObject {
                     self.relayout()
                     self.checkLowSpace()
                     let toSave = r
-                    Task.detached(priority: .utility) { try? ScanCache.save(toSave) }
+                    // Hook mode (cleanup disabled) never writes the user's cache.
+                    if !self.cleanupDisabled { Task.detached(priority: .utility) { try? ScanCache.save(toSave) } }
                 case .failed(let message):
                     self.scanError = message
                 }
@@ -246,7 +249,7 @@ final class AppModel: ObservableObject {
 
     /// Notifies once each time free space drops below the threshold.
     private func checkLowSpace() {
-        guard let free = freeBytes else { return }
+        guard let free = freeBytes, !cleanupDisabled else { return } // hook mode: no notifications
         let threshold = Int64(config.lowSpaceThresholdGB * 1_000_000_000)
         if free >= threshold { notifiedLow = false; return }
         guard !notifiedLow else { return }

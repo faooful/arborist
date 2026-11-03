@@ -14,6 +14,14 @@ enum Entry {
             HoverSweepRunner.snapshot(to: png)
             exit(0)
         }
+        if CommandLine.arguments.contains("--action-check") {
+            guard ProcessInfo.processInfo.environment["ARBORIST_HOVER_SWEEP"] == "1" else {
+                FileHandle.standardError.write(Data("--action-check needs ARBORIST_HOVER_SWEEP=1\n".utf8))
+                exit(2)
+            }
+            HoverSweepRunner.actionCheck()
+            exit(0)
+        }
         if let dir = HoverSweepRunner.requestedDirectory() {
             HoverSweepRunner.run(into: dir)
             exit(0)

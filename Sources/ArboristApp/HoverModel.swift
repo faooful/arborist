@@ -20,21 +20,20 @@ final class HoverModel: ObservableObject {
     nonisolated static func now() -> Double { Date().timeIntervalSinceReferenceDate }
 
     var hovered: String? { visible.hovered }
-    var cardOpacity: Double { tracker.cardOpacity }
 
     /// Layout → view mapping of the map as it is drawn right now (D15). Set by LeafMapView from its real size.
     var transform = MapTransform.identity { didSet { updateSpace() } }
-    /// The map's top-left in the popover's coordinate space, and the popover's size (D19). Set from the
-    /// "popover" named coordinate space; the card is placed against the whole popover, not the clipped map.
+    /// The map's top-left in the popover's coordinate space, and the popover's size (D19, D22). Set from the
+    /// "popover" named coordinate space; the tooltip is placed against the whole popover.
     var mapOrigin = Pt(0, 0) { didSet { updateSpace() } }
     var popoverSize: Pt? { didSet { updateSpace() } }
 
     private func updateSpace() {
-        let s = popoverSize.map { CardSpace(mapOrigin: mapOrigin, size: $0, transform: transform) }
-        if s != tracker.space { tracker.space = s }
+        let s = popoverSize.map { PopoverSpace(mapOrigin: mapOrigin, size: $0, transform: transform) }
+        if s != tracker.space { tracker.space = s; publish(false) }
     }
     /// Sweep hook: the space measured from AppKit's real layout.
-    func setSpace(_ s: CardSpace) { mapOrigin = s.mapOrigin; transform = s.transform; popoverSize = s.size }
+    func setSpace(_ s: PopoverSpace) { mapOrigin = s.mapOrigin; transform = s.transform; popoverSize = s.size }
 
     /// Pointer at `p` in the map view's own coordinates (top-left, y down). Mouse events and the sweep both
     /// come in here; the point goes through the same transform the drawing uses.
@@ -54,27 +53,13 @@ final class HoverModel: ObservableObject {
         tracker.move(to: Pt(p.x, p.y), in: map, at: t ?? Self.now())
         publish(animated)
         // D16: in a far gap the tracker sets a clear deadline; the same cancellable timer applies it.
-        if tracker.nextDeadline != nil { scheduleSettle(animated) }
-    }
-
-    /// D20: pointer on the card at `local` (the card's own coordinates, top-left). Goes through the same
-    /// tracker as the map, in map coordinates, so the card keeps priority over the leaves under it.
-    func cardPointer(local p: CGPoint, in map: LeafMap) {
-        guard let o = tracker.cardOrigin, let s = tracker.space else { return }
-        let view = Pt(o.x + p.x - s.mapOrigin.x, o.y + p.y - s.mapOrigin.y)
-        pointer(view: CGPoint(x: view.x, y: view.y), in: map)
-    }
-
-    /// D20: the pointer left the card.
-    func exitCard(at t: Double? = nil) {
-        tracker.exitCard(at: t ?? Self.now())
-        publish(true)
-        if tracker.nextDeadline != nil { scheduleSettle(true) }
+        if tracker.clearAt != nil { scheduleSettle(animated) }
     }
 
     /// Pointer left the map: clear after the grace period unless it comes back.
     func exit(at t: Double? = nil, animated: Bool = true) {
         tracker.exit(at: t ?? Self.now())
+        publish(animated) // the tooltip goes at once
         scheduleSettle(animated)
     }
 
@@ -98,11 +83,16 @@ final class HoverModel: ObservableObject {
         publish(false)
     }
 
-    func setCardSize(_ size: Pt) { tracker.cardSize = size }
-    /// The card's measured height; placement uses the taller of it and the Core slot (every row, D19).
-    func measuredCard(_ size: CGSize) {
-        let s = Pt(max(LeafSVG.cardSlot.x, size.width), max(LeafSVG.cardSlot.y, size.height))
-        if s != tracker.cardSize { tracker.cardSize = s }
+    /// Esc: unpin, keep the hover (D22).
+    func unpin() {
+        tracker.unpin()
+        publish(true)
+    }
+
+    /// The tooltip's measured size, so placement keeps it inside the popover.
+    func measuredTooltip(_ size: CGSize) {
+        let z = Pt(max(TooltipPlacement.size.x, size.width), max(TooltipPlacement.size.y, size.height))
+        if z != tracker.tooltipSize { tracker.tooltipSize = z; publish(false) }
     }
 
     /// Test hook: applies a due leave right away (time is simulated by the sweep).
@@ -112,7 +102,7 @@ final class HoverModel: ObservableObject {
 
     private func scheduleSettle(_ animated: Bool) {
         settleWork?.cancel()
-        let remaining = max(0, (tracker.nextDeadline ?? (Self.now() + HoverTracker.leaveDelay)) - Self.now())
+        let remaining = max(0, (tracker.clearAt ?? (Self.now() + HoverTracker.leaveDelay)) - Self.now())
         let delay = UInt64((remaining + 0.005) * 1_000_000_000)
         settleWork = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: delay)
@@ -124,7 +114,9 @@ final class HoverModel: ObservableObject {
     private func publish(_ animated: Bool) {
         let next = tracker.visible
         guard next != visible else { return }
-        if animated && !instant {
+        // The tooltip follows the pointer with no lag: only ring / strip changes animate.
+        let onlyPointer = next.hovered == visible.hovered && next.pinned == visible.pinned
+        if animated && !instant && !onlyPointer {
             withAnimation(.easeInOut(duration: HoverTracker.duration(reduceMotion: reduceMotion))) { visible = next }
         } else {
             var t = Transaction(); t.disablesAnimations = true

@@ -99,22 +99,13 @@ final class StateFilterTests: XCTestCase, @unchecked Sendable {
             XCTAssertEqual(p.terminationStatus, 0, "\(args)")
             let r = try JSONDecoder().decode(HoverSweep.Report.self, from: Data(contentsOf: dir.appendingPathComponent("frames.json")))
             XCTAssertEqual(r.mismatches, 0, r.summary)
-            XCTAssertEqual(r.cardClipped, 0, r.summary)
-            XCTAssertEqual(r.cardReachFailures, 0, r.summary)
-            XCTAssertEqual(r.buttonHits, 1, "D20: the reach path ends on a card button. " + r.summary)
+            XCTAssertEqual(r.stripMismatches, 0, r.summary)
+            XCTAssertEqual(r.tooltipClipped, 0, r.summary)
+            XCTAssertEqual(r.reachFailures, 0, r.summary)
+            XCTAssertEqual(r.buttonHits, 1, "D22: the pin + reach path ends on a strip button. " + r.summary)
             for f in r.frames { if let h = f.hovered { XCTAssertTrue(ready.contains(h), h) } }
             XCTAssertGreaterThan(r.hoveredCount, 0)
         }
     }
 
-    /// A single huge leaf: no spot clears it, but the card still never covers the pointer.
-    func testHugeLeafCardAvoidsPointer() {
-        let leaf = Rect(x: 16, y: 52, w: 448, h: 400), size = LeafSVG.cardSlot, b = Pt(480, 556)
-        for p in [Pt(30, 60), Pt(450, 60), Pt(30, 440), Pt(450, 440), Pt(240, 250)] {
-            let o = CardPlacement.place(leaf: leaf, size: size, in: b, pointer: p)
-            let r = Rect(x: o.x, y: o.y, w: size.x, h: size.y)
-            XCTAssertFalse(r.contains(p), "\(p)")
-            XCTAssertTrue(r.inside(width: b.x, height: b.y))
-        }
-    }
 }

@@ -3,14 +3,13 @@ import ArboristCleanup
 import ArboristCore
 import SwiftUI
 
-/// Draws the worktree leaf map (D12, D13, D15).
+/// Draws the worktree leaf map (D12, D13, D15, D22).
 ///
 /// Hover (D15): `HoverModel` is the only source of truth, fed by `MouseTracking` (an NSTrackingArea, because
-/// SwiftUI hover didn't fire in the MenuBarExtra window). Points resolve to the nearest leaf, so gutters and
-/// veins never clear the hover; only leaving the map does, after 80 ms. The card stays in one corner across a
-/// sweep and slides only when the hovered leaf would come near it. Its content cross-fades. The lift
-/// (scale and shadow) is drawing only: hit-testing uses the layout outlines. Reduce Motion: no lift, no
-/// slide, opacity only.
+/// SwiftUI hover didn't fire in the MenuBarExtra window). The pointer always maps to the leaf under it at once
+/// (D22: no corridor, grace or dwell); in a far gap or off the map hover clears after 80 ms (D16). The hovered
+/// leaf gets a ring, a tooltip follows the pointer, and the docked DetailStrip below the map shows the pinned
+/// or hovered leaf. Click pins; Esc or empty space unpins. Reduce Motion: no fades.
 struct LeafMapView: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var hover: HoverModel
@@ -39,34 +38,33 @@ struct LeafMapView: View {
             }
         }
         .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.mapHeight)
-        // Only the leaf drawing is clipped; the card is drawn by HoverCardOverlay above the popover (D19).
+        // Only the leaf drawing is clipped; the tooltip is drawn by TooltipOverlay above the popover (D22).
         .clipped()
         .background(GeometryReader { g in
             Color.clear
-                .onAppear { hover.mapOrigin = Pt(g.frame(in: .named(PopoverSpace.name)).minX, g.frame(in: .named(PopoverSpace.name)).minY) }
-                .onChange(of: g.frame(in: .named(PopoverSpace.name))) { f in hover.mapOrigin = Pt(f.minX, f.minY) }
+                .onAppear { hover.mapOrigin = Pt(g.frame(in: .named(PopoverCoords.name)).minX, g.frame(in: .named(PopoverCoords.name)).minY) }
+                .onChange(of: g.frame(in: .named(PopoverCoords.name))) { f in hover.mapOrigin = Pt(f.minX, f.minY) }
         })
-        .onExitCommand { hover.reset() }
+        .onExitCommand { hover.unpin() } // D22: Esc unpins
         .onDisappear { hover.reset() }
-        .onAppear { hover.reduceMotion = reduceMotion; hover.setCardSize(LeafSVG.cardSlot) }
+        .onAppear { hover.reduceMotion = reduceMotion }
         .onChange(of: reduceMotion) { r in hover.reduceMotion = r }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Worktree map: \(result.headline). The list has every worktree.")
     }
 
     /// Everything in layout coordinates; LeafMapView.body places it with the transform.
+    /// D22: other leaves dim only slightly; the hovered leaf gets a 2 pt dark ring, the pinned one a stronger
+    /// ring, in the strip's accent colour. Drawing only: nothing here takes hit-testing.
     @ViewBuilder private var content: some View {
         let v = hover.visible
+        let ringed = Set([v.hovered, v.pinned].compactMap { $0 })
         ZStack(alignment: .topLeading) {
             LeafCanvas(map: map, only: nil)
-                .opacity(v.hovered == nil ? 1 : LeafPalette.dimOthers)
-            if let h = v.hovered, let leaf = map.leaves.first(where: { $0.item.id == h }) {
-                // Drawing layer only: the scale never reaches hit-testing (MouseTracking and the tap use the map).
-                let a = UnitPoint(x: leaf.centroid.x / map.width, y: leaf.centroid.y / map.height)
-                LeafCanvas(map: map, only: h)
-                    .scaleEffect(reduceMotion ? 1 : LeafPalette.hoverScale, anchor: a)
-                    .shadow(color: .black.opacity(reduceMotion ? 0 : 0.16), radius: 5, x: 0, y: 3)
-                    .allowsHitTesting(false)
+                .opacity(ringed.isEmpty ? 1 : LeafPalette.dimOthers)
+            if !ringed.isEmpty {
+                LeafCanvas(map: map, only: ringed).allowsHitTesting(false)
+                LeafRings(map: map, hovered: v.hovered, pinned: v.pinned).allowsHitTesting(false)
             }
             ForEach(map.groupLabels, id: \.name) { g in
                 Text(g.name).font(.system(size: LeafText.groupSize, weight: .medium)).foregroundColor(Theme.ink3)
@@ -74,62 +72,74 @@ struct LeafMapView: View {
                     .allowsHitTesting(false)
             }
         }
+        .animation(reduceMotion || hover.instant ? nil : .easeInOut(duration: HoverTracker.duration(reduceMotion: false)), value: ringed)
     }
 }
 
 /// The popover's named coordinate space (D19).
-enum PopoverSpace { static let name = "popover" }
+enum PopoverCoords { static let name = "popover" }
 
-/// The hover card, drawn in an overlay on the popover root so the map's clip can't cut it (D19). Its origin
-/// is in popover coordinates (CardPlacement, against the whole popover).
-struct HoverCardOverlay: View {
+/// D22: the rings on the hovered and pinned leaves.
+struct LeafRings: View {
+    let map: LeafMap
+    let hovered: String?
+    let pinned: String?
+
+    var body: some View {
+        Canvas { ctx, _ in
+            for leaf in map.leaves {
+                let w = leaf.item.id == pinned ? LeafPalette.ringPinned : (leaf.item.id == hovered ? LeafPalette.ringHover : 0)
+                guard w > 0 else { continue }
+                ctx.stroke(LeafCanvas.path(leaf.outline), with: .color(Color(hex: LeafPalette.ring)),
+                           style: StrokeStyle(lineWidth: w, lineJoin: .round))
+            }
+        }
+        .frame(width: map.width, height: map.height)
+    }
+}
+
+/// D22: the tooltip that follows the pointer (branch, repo, size). Drawn in an overlay on the popover root,
+/// placed by Core against the whole popover; it never takes hit-testing.
+struct TooltipOverlay: View {
     @EnvironmentObject var hover: HoverModel
-    @EnvironmentObject var model: AppModel
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let result: ScanResult
 
     var body: some View {
         let v = hover.visible
         ZStack(alignment: .topLeading) {
-            if let id = v.card, let o = v.cardOrigin, let ref = WorktreeList.find(result, path: id) {
-                ZStack(alignment: .topLeading) {
-                    HoverCardView(card: HoverCard(ref), ref: ref)
-                        // D20: the card's own tracking, so the pointer on it (even outside the map) keeps it.
-                        .background(MouseTracking(onMove: { p in if let m = model.leafMap { hover.cardPointer(local: p, in: m) } },
-                                                  onExit: { hover.exitCard() }))
-                        .background(GeometryReader { g in
-                            Color.clear.onAppear { hover.measuredCard(g.size) }.onChange(of: g.size) { hover.measuredCard($0) }
-                        })
-                        .id(id)
-                        .transition(.opacity)
+            if let id = v.hovered, let o = v.tooltipOrigin, let ref = WorktreeList.find(result, path: id) {
+                let t = LeafTooltip(HoverCard(ref))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(t.branch).font(.system(size: 11.5, weight: .semibold)).foregroundColor(Theme.ink).lineLimit(1)
+                    Text(t.repo).font(.system(size: 10.5)).foregroundColor(Theme.ink2).lineLimit(1)
+                    Text(t.size).font(.system(size: 10.5)).foregroundColor(Theme.ink).lineLimit(1)
                 }
-                .animation(hover.instant ? nil : .easeInOut(duration: 0.12), value: id) // content cross-fade
-                .opacity(hover.cardOpacity)
+                .padding(.horizontal, 8)
+                .frame(width: TooltipPlacement.size.x, height: TooltipPlacement.size.y, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color(hex: LeafPalette.cardFill)).shadow(color: .black.opacity(0.12), radius: 4, y: 2))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(hex: LeafPalette.cardStroke), lineWidth: 0.6))
                 .offset(x: o.x, y: o.y)
-                // Slides to a new place; with Reduce Motion it jumps (opacity changes still fade).
-                .animation(reduceMotion || hover.instant ? nil : .easeInOut(duration: HoverTracker.duration(reduceMotion: false)), value: o)
-                // D20: the card takes priority over the leaves under it, so its buttons work pinned or not.
-                .allowsHitTesting(true)
-                .transition(.opacity)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
 /// All leaves (or just `only`) with their branch labels.
 struct LeafCanvas: View {
     let map: LeafMap
-    let only: String?
+    let only: Set<String>?
 
     var body: some View {
         Canvas { ctx, _ in
-            for leaf in map.leaves where only == nil || leaf.item.id == only { draw(leaf, in: &ctx) }
+            for leaf in map.leaves where only == nil || only!.contains(leaf.item.id) { draw(leaf, in: &ctx) }
         }
         .frame(width: map.width, height: map.height)
     }
 
-    private func path(_ pts: [Pt]) -> Path {
+    static func path(_ pts: [Pt]) -> Path {
         var p = Path()
         guard let f = pts.first else { return p }
         p.move(to: CGPoint(x: f.x, y: f.y))
@@ -139,11 +149,11 @@ struct LeafCanvas: View {
     }
 
     private func draw(_ leaf: Leaf, in ctx: inout GraphicsContext) {
-        let st = leaf.item.state, shape = path(leaf.outline)
+        let st = leaf.item.state, shape = Self.path(leaf.outline)
         ctx.fill(shape, with: .color(Color(hex: LeafPalette.fill(st))))
         if st == .stale { ctx.stroke(shape, with: .color(Color(hex: LeafPalette.staleStroke)), lineWidth: 0.4) }
         if !leaf.inner.isEmpty {
-            ctx.fill(path(leaf.inner), with: .color(Color(hex: LeafPalette.rebuildableShade, opacity: LeafPalette.rebuildableOpacity(st))))
+            ctx.fill(Self.path(leaf.inner), with: .color(Color(hex: LeafPalette.rebuildableShade, opacity: LeafPalette.rebuildableOpacity(st))))
         }
         let (vc, vo) = LeafPalette.vein(st)
         ctx.drawLayer { layer in
@@ -163,82 +173,105 @@ struct LeafCanvas: View {
     }
 }
 
-/// The hover card (D13): header, 2×2 stats, commit message, footer buttons. Same metrics as the SVG.
-struct HoverCardView: View {
-    @EnvironmentObject var model: AppModel
-    let card: HoverCard
-    let ref: WorktreeRef
+/// D22: the detail strip docked below the map, fixed size so the popover never resizes. Shows the pinned
+/// leaf, else the hovered one, else a hint. Its buttons sit at Core's StripLayout frames (the sweep checks them).
+struct DetailStrip: View {
+    @EnvironmentObject var hover: HoverModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let result: ScanResult
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 7) {
-                Text(card.branch).font(.system(size: 12, weight: .semibold)).foregroundColor(Theme.ink).lineLimit(1)
-                Text(card.pill).font(.system(size: 10, weight: .medium))
-                    .foregroundColor(Color(hex: LeafPalette.pillText(card.status)))
-                    .padding(.horizontal, 6).frame(height: 14)
-                    .background(Capsule().fill(Color(hex: LeafPalette.dot(card.status), opacity: 0.2)))
+        let v = hover.visible
+        let ref = v.strip.flatMap { WorktreeList.find(result, path: $0) }
+        ZStack(alignment: .topLeading) {
+            if let ref {
+                StripContent(card: HoverCard(ref), ref: ref, pinned: v.pinned != nil).id(ref.worktree.path).transition(.opacity)
+            } else {
+                Text("Hover a leaf for details · click to pin")
+                    .font(.system(size: 11)).foregroundColor(Theme.ink2)
+                    .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.stripHeight)
+                    .transition(.opacity)
             }
-            Text(card.repo).font(.system(size: 11)).foregroundColor(Theme.ink2).lineLimit(1).padding(.top, 3)
-            Text(card.path).font(.system(size: 10, design: .monospaced)).foregroundColor(Theme.ink2).lineLimit(1)
-                .help(card.fullPath).padding(.top, 2)
-            Rectangle().fill(Color(hex: LeafPalette.cardStroke)).frame(height: 0.6).padding(.vertical, 6)
-            Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
-                GridRow {
-                    stat("Size", card.size) {
-                        GeometryReader { g in
-                            ZStack(alignment: .leading) {
-                                Capsule().fill(Color(hex: LeafPalette.barTrack))
-                                Capsule().fill(Color(hex: LeafPalette.barFill)).frame(width: g.size.width * card.rebuildableShare)
-                            }
-                        }
-                        .frame(width: 96, height: 4)
-                        .opacity(card.rebuildableShare > 0 ? 1 : 0)
-                        .help(card.rebuildable ?? "")
-                    }
-                    stat("Changes", card.changes) { EmptyView() }
-                }
-                GridRow {
-                    stat("Sync", card.sync) { EmptyView() }
-                    stat("Last commit", card.lastCommit) { EmptyView() }
-                }
-            }
-            if !card.message.isEmpty {
-                Text(card.message.joined(separator: "\n")).font(.system(size: 11)).foregroundColor(Theme.ink)
-                    .lineLimit(2).fixedSize(horizontal: false, vertical: true).padding(.top, 6)
-            }
-            // D20: the footer sits at the bottom of the fixed card slot, where HoverCardLayout puts the buttons.
-            Spacer(minLength: 0)
-            HStack(spacing: 6) {
-                Button("Reveal in Finder") { model.reveal(ref.worktree.path) }
-                if let cmd = card.removeCommand { Button("Copy remove command") { model.copy(cmd) }.help(cmd) }
-            }
-            .buttonStyle(SubtleButtonStyle())
-            .padding(.top, 8)
-            RemoveButton(ref: ref).buttonStyle(SubtleButtonStyle()).padding(.top, 4)
         }
-        .padding(10)
-        .frame(width: LeafSVG.cardWidth, height: LeafSVG.cardSlot.y, alignment: .topLeading)
-        .background(RoundedRectangle(cornerRadius: 9).fill(Color(hex: LeafPalette.cardFill)).shadow(color: .black.opacity(0.12), radius: 5, y: 3))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color(hex: LeafPalette.cardStroke), lineWidth: 0.6))
-    }
-
-    private func stat<Extra: View>(_ label: String, _ value: String, @ViewBuilder extra: () -> Extra) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(.system(size: 10)).foregroundColor(Theme.ink2)
-            Text(value).font(.system(size: 11.5, weight: .medium)).foregroundColor(Theme.ink).lineLimit(1)
-            extra()
-        }
-        .frame(width: (LeafSVG.cardWidth - 28) / 2, alignment: .leading)
+        .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.stripHeight, alignment: .topLeading)
+        .background(RoundedRectangle(cornerRadius: 9).fill(Color(hex: LeafPalette.cardFill)))
+        .overlay(RoundedRectangle(cornerRadius: 9)
+            .stroke(v.pinned != nil ? Color(hex: LeafPalette.ring) : Color(hex: LeafPalette.cardStroke), lineWidth: v.pinned != nil ? 1.2 : 0.6))
+        .animation(reduceMotion || hover.instant ? nil : .easeInOut(duration: 0.12), value: v.strip)
     }
 }
 
-struct SubtleButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 11)).foregroundColor(Theme.ink)
-            .padding(.horizontal, 8).frame(height: 22)
-            .background(RoundedRectangle(cornerRadius: 6).fill(configuration.isPressed ? Theme.line : Color(hex: LeafPalette.background)))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(hex: LeafPalette.cardStroke), lineWidth: 0.6))
+struct StripContent: View {
+    @EnvironmentObject var model: AppModel
+    @EnvironmentObject var hover: HoverModel
+    let card: HoverCard
+    let ref: WorktreeRef
+    let pinned: Bool
+
+    var body: some View {
+        let pad = StripLayout.padding
+        ZStack(alignment: .topLeading) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 7) {
+                    Text(card.branch).font(.system(size: 12, weight: .semibold)).foregroundColor(Theme.ink).lineLimit(1)
+                    Text(card.pill).font(.system(size: 10, weight: .medium))
+                        .foregroundColor(Color(hex: LeafPalette.pillText(card.status)))
+                        .padding(.horizontal, 6).frame(height: 14)
+                        .background(Capsule().fill(Color(hex: LeafPalette.dot(card.status), opacity: 0.2)))
+                    Text(card.repo).font(.system(size: 11)).foregroundColor(Theme.ink2).lineLimit(1)
+                    Spacer(minLength: 4)
+                    if pinned {
+                        Button { hover.unpin() } label: { Text("Pinned · Esc").font(.system(size: 10)) }
+                            .buttonStyle(HoverButtonStyle(kind: .link, height: 16))
+                            .foregroundColor(Color(hex: LeafPalette.ring))
+                            .help("Unpin (Esc, or click empty space on the map)")
+                    }
+                }
+                Text(card.path).font(.system(size: 10, design: .monospaced)).foregroundColor(Theme.ink2).lineLimit(1)
+                    .help(card.fullPath)
+                HStack(spacing: 0) {
+                    stat("Size", card.size).help(card.rebuildable ?? "")
+                    stat("Changes", card.changes)
+                    stat("Sync", card.sync)
+                    stat("Last commit", card.lastCommit)
+                }
+                .padding(.top, 2)
+                Text(card.message.joined(separator: " ")).font(.system(size: 11)).foregroundColor(Theme.ink).lineLimit(1)
+            }
+            .padding(.horizontal, pad).padding(.top, 8)
+            .frame(width: PopoverLayout.mapWidth, alignment: .leading)
+            // Fixed frames from StripLayout (the sweep's reach path ends on the first one).
+            let y = PopoverLayout.stripHeight - pad - StripLayout.row
+            ForEach(StripLayout.buttons.indices, id: \.self) { i in
+                let b = StripLayout.buttons[i]
+                button(b.name)
+                    .frame(width: b.w, height: StripLayout.row)
+                    .offset(x: pad + b.x, y: y)
+            }
+        }
+        .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.stripHeight, alignment: .topLeading)
+    }
+
+    @ViewBuilder private func button(_ name: String) -> some View {
+        switch name {
+        case "Reveal in Finder":
+            Button(name) { model.reveal(ref.worktree.path) }.buttonStyle(HoverButtonStyle())
+        case "Copy remove command":
+            Button(name) { if let c = card.removeCommand { model.copy(c) } }
+                .buttonStyle(HoverButtonStyle())
+                .disabled(card.removeCommand == nil)
+                .help(card.removeCommand ?? "The main worktree can't be removed.")
+        default:
+            RemoveButton(ref: ref, showReason: false).buttonStyle(HoverButtonStyle())
+        }
+    }
+
+    private func stat(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label).font(.system(size: 10)).foregroundColor(Theme.ink2)
+            Text(value).font(.system(size: 11.5, weight: .medium)).foregroundColor(Theme.ink).lineLimit(1)
+        }
+        .frame(width: (PopoverLayout.mapWidth - 2 * StripLayout.padding) / 4, alignment: .leading)
     }
 }
 

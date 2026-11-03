@@ -13,14 +13,14 @@ final class HoverSweepTruthTests: XCTestCase, @unchecked Sendable {
     func testNoMismatchesUnderSeveralTransforms() {
         for t in [MapTransform.identity, .fit(map, into: Pt(448, 400), origin: Pt(16, 52)),
                   .fit(map, into: Pt(300, 260)), .fit(map, into: Pt(700, 400))] {
-            let report = HoverSweep.Report(HoverSweep.run(map, path: HoverSweep.path(in: map, rows: 7, perRow: 40), transform: t))
+            let report = HoverSweep.Report(HoverSweep.run(map, transform: t, rows: 7, perRow: 40))
             XCTAssertEqual(report.mismatches, 0, "\(t): \(report.summary)")
             XCTAssertGreaterThan(report.frames.filter { $0.underPointer != nil }.count, 100)
         }
     }
 
     func testGapFramesAreMarkedAndSnapped() throws {
-        let frames = HoverSweep.run(map, path: HoverSweep.path(in: map))
+        let frames = HoverSweep.run(map)
         for f in frames where f.inGap { XCTAssertNil(f.underPointer) }
         for f in frames where !f.inGap { XCTAssertNil(f.snappedTo) }
         let s = String(decoding: HoverSweep.json(frames), as: UTF8.self)
@@ -41,16 +41,18 @@ final class HoverSweepTruthTests: XCTestCase, @unchecked Sendable {
         try p.run(); p.waitUntilExit()
         XCTAssertEqual(p.terminationStatus, 0)
         let r = try JSONDecoder().decode(HoverSweep.Report.self, from: Data(contentsOf: dir.appendingPathComponent("frames.json")))
-        XCTAssertEqual(r.frames.count, 57, "48 serpentine + 7 reach-into-card (D20) + 2 leave")
+        XCTAssertEqual(r.frames.count, 58, "48 serpentine + 8 pin-and-reach (D22) + 2 leave")
         XCTAssertEqual(r.mismatches, 0, r.summary)
-        XCTAssertEqual(r.cardReachFailures, 0, r.summary)
-        let target = try XCTUnwrap(r.frames.first(where: \.reachTarget), "D20 reach path")
+        XCTAssertEqual(r.stripMismatches, 0, r.summary)
+        XCTAssertEqual(r.reachFailures, 0, r.summary)
+        let target = try XCTUnwrap(r.frames.first(where: \.reachTarget), "D22 pin + reach path")
         XCTAssertNotNil(target.buttonUnderPointer, r.summary)
-        XCTAssertTrue(target.onCard)
+        XCTAssertNotNil(target.pinned)
+        XCTAssertEqual(target.strip, target.pinned, "the pinned leaf stays in the strip under the button")
         XCTAssertEqual(r.buttonHits, 1)
         XCTAssertGreaterThan(r.hoveredCount, 40)
-        XCTAssertEqual(r.cardClipped, 0, "D19: the card is always inside the popover. " + r.summary)
-        XCTAssertTrue(r.frames.contains { $0.cardRect != nil })
+        XCTAssertEqual(r.tooltipClipped, 0, "D22: the tooltip is always inside the popover. " + r.summary)
+        XCTAssertGreaterThan(r.tooltipFrames, 40)
     }
 
     static func cliBinary() -> URL? {
