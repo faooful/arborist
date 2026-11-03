@@ -171,9 +171,19 @@ enum HoverSweepRunner {
             exit(2)
         }
         _ = NSApplication.shared
-        NSApp.setActivationPolicy(.accessory) // like the menu bar app; never a status item here
+        // D23: really launch (a window can only become key in an active, launched app). Still no status item:
+        // the App scene isn't created.
+        NSApp.setActivationPolicy(.regular)
+        NSApp.finishLaunching()
         let scan = ScanCache.load() ?? Scanner(config: ArboristConfig.load()).scan()
         let model = AppModel(sweepWith: scan)
+        // D23: host the real PopoverView once, offscreen, so SettingsActionBridge registers openSettings (14+).
+        let bridgeHost = NSHostingView(rootView: PopoverView().environmentObject(model).environmentObject(model.hover))
+        let bridgeWindow = NSWindow(contentRect: NSRect(x: -10_000, y: -10_000, width: 480, height: 700),
+                                    styleMask: [.borderless], backing: .buffered, defer: false)
+        bridgeWindow.contentView = bridgeHost
+        bridgeWindow.orderBack(nil)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         precondition(model.cleanupDisabled, "action-check must run with cleanup disabled")
         let router = model.router
         precondition(router.dryRunQuit, "hook mode must never quit")
@@ -187,20 +197,55 @@ enum HoverSweepRunner {
         log(r.log + " (scanning=\(model.scanning), progress=\(model.progressLabel ?? "none"))")
         log(router.perform(.rescan).log + " (second tap while scanning)")
 
+        // D23: how this process was launched and who is frontmost. On macOS 14+ activation is cooperative: only
+        // the active app can yield (NSApp.yieldActivation(to:) is called by the *yielding* app on itself), so a
+        // process started from Terminal can't make Terminal yield. Launched via `open` (scripts/action-check.sh)
+        // LaunchServices activates it, the way a user launch or a click in its own menu bar window does.
+        let front0 = NSWorkspace.shared.frontmostApplication
+        log("launch: bundle=\(Bundle.main.bundleIdentifier ?? "none"), frontmost=\(front0?.localizedName ?? "none")"
+            + " (pid \(front0?.processIdentifier ?? 0), self \(ProcessInfo.processInfo.processIdentifier)), active=\(NSApp.isActive)")
+
         var done = false
         SettingsOpener.shared.run(SettingsOpening.steps(osMajor: router.osMajor), model: model) { report in
             log("settings: fired; " + report)
             done = true
         }
         let until = Date().addingTimeInterval(5)
-        while !done && Date() < until { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+        while !done && Date() < until { pumpEvents(0.05) }
         if !done { log("settings: no report within 5 s") }
+        // D23: retry activation + key for up to ~1 s, pumping real AppKit events (activation arrives as events).
+        if let w = SettingsOpener.settingsWindow() {
+            var tries = 0
+            while !(NSApp.isActive && w.isKeyWindow) && tries < 10 {
+                SettingsOpener.activateApp(); w.makeKeyAndOrderFront(nil)
+                pumpEvents(0.1); tries += 1
+            }
+            let front = NSWorkspace.shared.frontmostApplication
+            let ok = NSApp.isActive && w.isKeyWindow
+            log("settings: after \(tries) retries active=\(NSApp.isActive), key=\(w.isKeyWindow), frontmost=\(front?.localizedName ?? "none")")
+            log("settings verdict: " + (ok ? "PROVEN (front and key)"
+                : front?.processIdentifier != ProcessInfo.processInfo.processIdentifier
+                    ? "HARNESS: activation refused while \(front?.localizedName ?? "another app") is frontmost (macOS 14 cooperative activation); run scripts/action-check.sh or click the gear"
+                    : "BUG: app is frontmost but the Settings window isn't key"))
+        }
         // Let the rescan finish (or time out) so its progress is logged too; it never writes the cache here.
         let scanUntil = Date().addingTimeInterval(40)
         while model.scanning && Date() < scanUntil { RunLoop.current.run(until: Date().addingTimeInterval(0.1)) }
         log("rescan finished=\(!model.scanning), repos=\(model.scanned?.repos.count ?? 0), cached=\(model.resultIsCached)")
         precondition(model.pendingCleanup == nil && model.cleanupResults == nil && !model.cleaning, "cleanup must not run")
+        bridgeWindow.orderOut(nil)
         log(done ? "done" : "done (settings unverified)")
+    }
+
+    /// Runs the AppKit event loop for `seconds` (not just the run loop): activation and key changes arrive as events.
+    static func pumpEvents(_ seconds: TimeInterval) {
+        let end = Date().addingTimeInterval(seconds)
+        while Date() < end {
+            if let e = NSApp.nextEvent(matching: .any, until: Date().addingTimeInterval(0.01), inMode: .default, dequeue: true) {
+                NSApp.sendEvent(e)
+            }
+        }
+        NSApp.updateWindows()
     }
 
     /// `--snapshot PNG` (D17): the popover in the cached + scanning state, hosted and sized the way the

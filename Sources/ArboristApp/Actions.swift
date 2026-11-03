@@ -1,6 +1,7 @@
 #if os(macOS)
 import AppKit
 import ArboristCore
+import os
 import SwiftUI
 
 /// D22: the app side of the action seam. Settings, Quit, Rescan and List go through `PopoverActionRouter`
@@ -41,7 +42,7 @@ final class SettingsOpener {
             case .becomeRegular:
                 NSApp.setActivationPolicy(.regular); log.append("policy=regular")
             case .activate:
-                NSApp.activate(ignoringOtherApps: true); log.append("activated")
+                Self.activateApp(); log.append("activated")
             case .openSettingsAction:
                 if let a = openAction { a(); log.append("openSettings") } else {
                     NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil); log.append("showSettingsWindow: (no openSettings bridge)")
@@ -61,15 +62,42 @@ final class SettingsOpener {
                     w = self.showFallback(model: model); log.append("fallback window")
                 }
                 if let w, steps.contains(.orderFront) {
-                    w.makeKeyAndOrderFront(nil); w.orderFrontRegardless(); log.append("ordered front")
+                    // D23: close the MenuBarExtra panel (it holds key), activate again, then make key.
+                    let ran = SettingsOpening.front(WindowDriver(w))
+                    log.append("fronted \(ran.map { "\($0)" }.joined(separator: "→"))")
                     self.watchClose(w)
                 }
-                let key = w.map { $0 == NSApp.keyWindow } ?? false
-                let front = w.map { win in NSApp.orderedWindows.first { $0.isVisible } == win } ?? false
-                self.lastReport = (log + ["settingsWindow=\(w != nil)", "key=\(key)", "front=\(front)"]).joined(separator: ", ")
-                done?(self.lastReport)
+                // Key status settles on the next run-loop turn.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    MainActor.assumeIsolated {
+                        let key = w?.isKeyWindow ?? false
+                        let front = w.map { win in NSApp.orderedWindows.first { $0.isVisible } == win } ?? false
+                        self.lastReport = (log + ["bridge=\(self.openAction != nil)", "settingsWindow=\(w != nil)",
+                                                  "active=\(NSApp.isActive)", "key=\(key)", "front=\(front)"]).joined(separator: ", ")
+                        // D23: the real gear click logs here too: log stream --predicate 'subsystem == "com.faooful.arborist"'
+                        Logger(subsystem: "com.faooful.arborist", category: "settings").notice("settings: \(self.lastReport, privacy: .public)")
+                        done?(self.lastReport)
+                    }
+                }
             }
         }
+    }
+
+    /// macOS 14+: cooperative activation (`activate(ignoringOtherApps:)` is deprecated and often ignored).
+    static func activateApp() {
+        if #available(macOS 14.0, *) { NSApp.activate() } else { NSApp.activate(ignoringOtherApps: true) }
+    }
+
+    /// D23: the real window operations behind `SettingsOpening.front`.
+    final class WindowDriver: SettingsWindowDriver {
+        let window: NSWindow
+        init(_ w: NSWindow) { window = w }
+        private var keyPanel: NSPanel? { (NSApp.keyWindow as? NSPanel).flatMap { $0 === window ? nil : $0 } }
+        var panelIsKey: Bool { keyPanel != nil }
+        func closePanel() { keyPanel?.orderOut(nil) }
+        func activateApp() { SettingsOpener.activateApp() }
+        func makeKeyAndOrderFront() { window.makeKeyAndOrderFront(nil) }
+        func orderFrontRegardless() { window.orderFrontRegardless() }
     }
 
     /// The SwiftUI Settings window (its identifier contains "Settings"), or our fallback.

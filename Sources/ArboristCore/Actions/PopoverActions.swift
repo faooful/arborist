@@ -97,3 +97,39 @@ public enum SettingsOpening {
     /// After the Settings window closes: back to a menu-bar-only app unless another window is still open.
     public static func shouldBecomeAccessory(otherVisibleWindows: Int) -> Bool { otherVisibleWindows == 0 }
 }
+
+/// D23: bringing the found Settings window to the front *and key*. The MenuBarExtra panel holds key while the
+/// gear is clicked, and on macOS 14+ activation is cooperative, so the order matters: close the panel, activate
+/// (again, now that the window exists), then makeKeyAndOrderFront, then orderFrontRegardless.
+@MainActor
+public protocol SettingsWindowDriver: AnyObject {
+    /// True if the MenuBarExtra panel (or another panel) is currently key.
+    var panelIsKey: Bool { get }
+    func closePanel()
+    func activateApp()
+    func makeKeyAndOrderFront()
+    func orderFrontRegardless()
+}
+
+extension SettingsOpening {
+    public enum FrontStep: Equatable, Sendable { case closePanel, activate, makeKeyAndOrderFront, orderFrontRegardless }
+
+    public static func frontSteps(panelIsKey: Bool) -> [FrontStep] {
+        (panelIsKey ? [.closePanel] : []) + [.activate, .makeKeyAndOrderFront, .orderFrontRegardless]
+    }
+
+    /// Runs `frontSteps` against the driver, in order; returns what ran.
+    @MainActor @discardableResult
+    public static func front(_ d: SettingsWindowDriver) -> [FrontStep] {
+        let steps = frontSteps(panelIsKey: d.panelIsKey)
+        for s in steps {
+            switch s {
+            case .closePanel: d.closePanel()
+            case .activate: d.activateApp()
+            case .makeKeyAndOrderFront: d.makeKeyAndOrderFront()
+            case .orderFrontRegardless: d.orderFrontRegardless()
+            }
+        }
+        return steps
+    }
+}
