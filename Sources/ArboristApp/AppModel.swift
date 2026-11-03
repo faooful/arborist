@@ -22,6 +22,8 @@ final class AppModel: ObservableObject {
     /// True when there are repos but the filter hides all of them.
     var filterHidesEverything: Bool { scanned.map { filter.isEmpty($0.repos) } ?? false }
     @Published var scanning = false
+    /// D26: the repo filter menu, an in-popover panel (not a system popover).
+    @Published var repoMenuOpen = false
     /// Repos measured so far in the running scan, and how many there are (nil until discovered).
     @Published private(set) var progress: (done: Int, total: Int?)?
     /// Set when `result` came from the on-disk cache and no fresh scan has finished yet.

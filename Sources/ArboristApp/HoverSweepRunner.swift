@@ -118,12 +118,46 @@ enum HoverSweepRunner {
             // D22: the popover never resizes on hover.
             if host.fittingSize != sizeBefore { fail("popover resized on hover: \(sizeBefore) → \(host.fittingSize) at frame \(i)") }
         }
-        let report = HoverSweep.Report(frames, cases: LayoutCase.all(model.result ?? scan, map: map))
+        // D26: the open repo menu: capture it, sample its background (opaque, light) and check its colours.
+        let menuChecks = openRepoMenu(model, host: host, to: dir + "/menu.png")
+        let header = (hover.drawnHeader ?? []).map {
+            LegendMeasure(label: $0.label, natural: $0.natural, frame: Rect(x: $0.frame.x - PopoverLayout.padding, y: $0.frame.y, w: $0.frame.w, h: $0.frame.h))
+        }
+        if header.isEmpty { fail("header not measured") }
+        let report = HoverSweep.Report(frames, cases: LayoutCase.all(model.result ?? scan, map: map), header: header, menu: menuChecks)
         do { try HoverSweep.json(report).write(to: URL(fileURLWithPath: dir + "/frames.json")) } catch { fail("\(error)") }
         precondition(model.pendingCleanup == nil && model.cleanupResults == nil && !model.cleaning, "cleanup must not run")
         window.orderOut(nil)
         print(report.summary)
         print("frames in \(dir)")
+    }
+
+    /// D26: opens the repo menu panel, captures it to `png`, and returns RepoMenuStyle's contrast checks plus
+    /// one for the rendered panel: a pixel inside it must be the opaque menu background (not the map behind).
+    static func openRepoMenu(_ model: AppModel, host: NSView, to png: String) -> [RepoMenuStyle.Contrast] {
+        model.repoMenuOpen = true
+        settle(host); settle(host)
+        capture(host, marker: nil, to: png)
+        var checks = RepoMenuStyle.checks()
+        guard let f = model.hover.drawnRepoMenu, let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
+            fail("repo menu not drawn")
+        }
+        host.cacheDisplay(in: host.bounds, to: rep)
+        let sx = CGFloat(rep.pixelsWide) / host.bounds.width
+        // Top row, between "None" and the hint: plain panel background.
+        let px = Int((f.x + f.w / 2) * sx), py = Int((f.y + 5) * sx)
+        let c = rep.colorAt(x: px, y: py)?.usingColorSpace(.sRGB)
+        let hex = c.map { String(format: "#%02x%02x%02x", Int($0.redComponent * 255), Int($0.greenComponent * 255), Int($0.blueComponent * 255)) } ?? "#000000"
+        let want = RepoMenuStyle.ratio(hex, RepoMenuStyle.background)
+        // Opaque in the light palette: the sampled pixel matches the panel colour (ratio ≈ 1), and the names on it pass.
+        checks.append(RepoMenuStyle.Contrast(what: "panel background sampled \(hex)", fg: hex, bg: RepoMenuStyle.background,
+                                             ratio: want <= 1.05 ? 99 : 0, minimum: 1))
+        checks.append(RepoMenuStyle.Contrast(what: "name on sampled panel", fg: RepoMenuStyle.name, bg: hex,
+                                             ratio: RepoMenuStyle.ratio(RepoMenuStyle.name, hex), minimum: 4.5))
+        model.repoMenuOpen = false
+        settle(host)
+        print("repo menu: frame \(f), sampled background \(hex)")
+        return checks
     }
 
     /// `--action-check` (D22): runs Settings, Quit (dry run), Rescan and List through the real router and
@@ -207,6 +241,12 @@ enum HoverSweepRunner {
             print("map frame: none (no map in this state)")
         }
         print("transform: \(model.hover.transform)")
+        // D26: `--repo-menu` captures the popover with the repo filter menu open.
+        if CommandLine.arguments.contains("--repo-menu") {
+            let checks = openRepoMenu(model, host: host, to: png)
+            print("menu contrast failures: \(checks.filter(\.fails).count)")
+            model.repoMenuOpen = true; settle(host)
+        }
         capture(host, marker: nil, to: png)
         window.orderOut(nil)
         print("wrote \(png)")

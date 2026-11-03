@@ -19,7 +19,8 @@ public enum LeafSVG {
     /// `hover` is the hovered leaf (ringed, in the panel unless one is `pinned`, i.e. selected); `pointer`
     /// (map coordinates) draws the sweep's pointer marker. D25: no tooltip; the panel is the readout.
     public static func popover(_ r: ScanResult, map: LeafMap, note: String = "Linux render", hover: String? = nil, pinned: String? = nil,
-                               now: Date = Date(), pointer: Pt? = nil, showAll: Bool = false) -> String {
+                               now: Date = Date(), pointer: Pt? = nil, showAll: Bool = false,
+                               filterLabel: String? = nil, status: String = "", menu: [RepoMenuRow]? = nil) -> String {
         let freeBytes = r.volume?.freeBytes ?? 0, totalBytes = r.volume?.totalBytes ?? 0
         let pad = svgPad, mapTop = svgMapTop, size = svgSize(map), w = size.x, h = size.y
         let space = popoverSpace(map)
@@ -29,11 +30,8 @@ public enum LeafSVG {
         let shown = (pinned ?? hover).flatMap { WorktreeList.find(r, path: $0) }.map { HoverCard($0, now: now, home: LeafSample.home) }
         var s = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"\(f(w))\" height=\"\(f(h))\" viewBox=\"0 0 \(f(w)) \(f(h))\" font-family=\"-apple-system, 'SF Pro Text', Inter, 'DejaVu Sans', sans-serif\">"
         s += "<rect width=\"100%\" height=\"100%\" rx=\"14\" fill=\"\(LeafPalette.background)\"/>"
-        let parts = r.headline.split(separator: " ", maxSplits: 2).map(String.init)
-        s += "<text x=\"\(pad)\" y=\"38\" font-size=\"22\" font-weight=\"400\" fill=\"\(LeafPalette.ink)\">\(esc(parts.prefix(2).joined(separator: " ")))"
-        if parts.count > 2 { s += "<tspan font-size=\"13\" fill=\"\(LeafPalette.inkSoft)\" dx=\"5\">\(esc(parts[2]))</tspan>" }
-        s += "</text>"
-        s += "<text x=\"\(f(w - pad))\" y=\"36\" text-anchor=\"end\" font-size=\"11.5\" fill=\"\(LeafPalette.inkSoft)\">Arborist</text>"
+        let hs = header(r, filter: filterLabel ?? HeaderLayout.filterLabel(selected: r.repos.map(\.name), total: r.repos.count), status: status)
+        s += hs.svg
         s += "<g transform=\"translate(\(pad),\(mapTop))\">" + mapBody(map, hover: hover, pinned: pinned) + "</g>"
         if let shown {
             s += strip(shown, pinned: pinned != nil, in: slot).svg
@@ -46,6 +44,7 @@ public enum LeafSVG {
             s += "<rect x=\"\(f(b.x))\" y=\"\(f(b.y))\" width=\"\(f(b.w))\" height=\"\(f(b.h))\" rx=\"7\" fill=\"\(dark ? LeafPalette.button : "none")\"/>"
             s += text(b.x + b.w / 2, b.y + 18, label, size: 12, color: dark ? LeafPalette.labelOnDark : LeafPalette.inkSoft, weight: dark ? 500 : 400)
         }
+        if let menu { s += repoMenu(menu, under: HeaderLayout.filterButton(hs.frames)) }
         if let p = pointer {
             s += "<circle cx=\"\(f(p.x + pad))\" cy=\"\(f(p.y + mapTop))\" r=\"3.5\" fill=\"#d0402b\" stroke=\"#fff\" stroke-width=\"1\"/>"
         }
@@ -79,6 +78,64 @@ public enum LeafSVG {
     }
     /// The SVG popover as a popover space: the map at (16, 52), drawn 1:1.
     public static func popoverSpace(_ map: LeafMap) -> PopoverSpace { PopoverSpace(mapOrigin: Pt(svgPad, svgMapTop), size: svgSize(map)) }
+
+    /// D26: the header row from HeaderLayout's frames (offset by the popover padding): count, stale, the
+    /// filter button and the status icon. Every text at its natural width.
+    public static func header(_ r: ScanResult, filter: String, status: String) -> (svg: String, frames: [(name: String, text: String, rect: Rect)], measures: [LegendMeasure]) {
+        let c = HeaderLayout.count(r), sub = HeaderLayout.sub(r)
+        let fr = HeaderLayout.frames(count: c, sub: sub, filter: filter)
+        let ox = svgPad, oy = svgPad
+        func at(_ n: String) -> Rect { let q = fr.first { $0.name == n }!.rect; return Rect(x: ox + q.x, y: oy + q.y, w: q.w, h: q.h) }
+        var s = ""
+        let a = at("count"), b = at("sub"), fb = at("filter"), st = at("status")
+        s += "<text x=\"\(f(a.x))\" y=\"\(f(oy + 22))\" font-size=\"22\" font-weight=\"400\" fill=\"\(LeafPalette.ink)\">\(esc(c))</text>"
+        if !sub.isEmpty { s += "<text x=\"\(f(b.x))\" y=\"\(f(oy + 22))\" font-size=\"13\" fill=\"\(LeafPalette.inkSoft)\">\(esc(sub))</text>" }
+        s += "<text x=\"\(f(fb.x + 4))\" y=\"\(f(oy + 21))\" font-size=\"11.5\" fill=\"\(LeafPalette.inkSoft)\">\(esc(filter)) ▾</text>"
+        s += "<circle cx=\"\(f(st.x + 9))\" cy=\"\(f(st.y + 9))\" r=\"6\" fill=\"none\" stroke=\"\(LeafPalette.inkSoft)\" stroke-width=\"1.2\"><title>\(esc(status.isEmpty ? "Arborist" : status))</title></circle>"
+        let fbBox = HeaderLayout.filterButton(fr)
+        let m = HeaderLayout.measures(count: c, sub: sub, filter: filter).map {
+            LegendMeasure(label: $0.label, natural: $0.natural, frame: Rect(x: ox + $0.frame.x, y: oy + $0.frame.y, w: $0.frame.w, h: $0.frame.h))
+        }
+        _ = fbBox
+        return (s, fr, m)
+    }
+
+    /// D26: the repo filter menu, open: an opaque light panel under the filter button (RepoMenuLayout,
+    /// RepoMenuStyle), checkboxes, names, counts; the first row drawn hovered.
+    public static func repoMenu(_ rows: [RepoMenuRow], under button: Rect) -> String {
+        let o = RepoMenuLayout.origin(filterButton: button), x = svgPad + o.x, y = svgPad + o.y, w = RepoMenuLayout.width
+        let searching = rows.count > RepoFilter.searchThreshold, p = RepoMenuLayout.padding
+        let h = RepoMenuLayout.height(rows: rows.count, searching: searching)
+        var s = "<rect x=\"\(f(x))\" y=\"\(f(y + 2))\" width=\"\(f(w))\" height=\"\(f(h))\" rx=\"8\" fill=\"#000\" fill-opacity=\".12\"/>"
+        s += "<rect x=\"\(f(x))\" y=\"\(f(y))\" width=\"\(f(w))\" height=\"\(f(h))\" rx=\"8\" fill=\"\(RepoMenuStyle.background)\" stroke=\"\(RepoMenuStyle.stroke)\" stroke-width=\".8\"/>"
+        var cy = y + p
+        s += "<text x=\"\(f(x + p))\" y=\"\(f(cy + 15))\" font-size=\"11\" fill=\"\(RepoMenuStyle.name)\">All</text>"
+        s += "<text x=\"\(f(x + p + 30))\" y=\"\(f(cy + 15))\" font-size=\"11\" fill=\"\(RepoMenuStyle.name)\">None</text>"
+        s += "<text x=\"\(f(x + w - p))\" y=\"\(f(cy + 15))\" text-anchor=\"end\" font-size=\"10\" fill=\"\(RepoMenuStyle.hint)\">⌥-click: only</text>"
+        cy += RepoMenuLayout.topRow
+        if searching {
+            s += "<rect x=\"\(f(x + p))\" y=\"\(f(cy + 2))\" width=\"\(f(w - 2 * p))\" height=\"20\" rx=\"5\" fill=\"#fff\" stroke=\"\(RepoMenuStyle.stroke)\"/>"
+            s += "<text x=\"\(f(x + p + 6))\" y=\"\(f(cy + 16))\" font-size=\"11\" fill=\"\(RepoMenuStyle.hint)\">Search repos</text>"
+            cy += RepoMenuLayout.search
+        }
+        s += "<line x1=\"\(f(x + p))\" x2=\"\(f(x + w - p))\" y1=\"\(f(cy + 4))\" y2=\"\(f(cy + 4))\" stroke=\"\(RepoMenuStyle.stroke)\"/>"
+        cy += RepoMenuLayout.divider
+        for (i, r) in rows.prefix(RepoMenuLayout.maxRows).enumerated() {
+            if i == 0 { s += "<rect x=\"\(f(x + 4))\" y=\"\(f(cy))\" width=\"\(f(w - 8))\" height=\"\(f(RepoMenuLayout.row))\" rx=\"5\" fill=\"\(RepoMenuStyle.hover)\"/>" }
+            let bx = x + p, by = cy + 4, cs = RepoMenuLayout.checkSide
+            if r.selected {
+                s += "<rect x=\"\(f(bx))\" y=\"\(f(by))\" width=\"\(f(cs))\" height=\"\(f(cs))\" rx=\"3\" fill=\"\(RepoMenuStyle.selectedCheck)\"/>"
+                s += "<path d=\"M\(f(bx + 3.5)) \(f(by + 7.5)) l3 3 l4.5 -6\" stroke=\"#fff\" stroke-width=\"1.6\" fill=\"none\"/>"
+            } else {
+                s += "<rect x=\"\(f(bx + 0.5))\" y=\"\(f(by + 0.5))\" width=\"\(f(cs - 1))\" height=\"\(f(cs - 1))\" rx=\"3\" fill=\"none\" stroke=\"\(RepoMenuStyle.uncheckedBox)\"/>"
+            }
+            let nameW = w - 2 * p - cs - 6 - RepoMenuLayout.countWidth
+            s += "<text x=\"\(f(bx + cs + 6))\" y=\"\(f(cy + 15))\" font-size=\"11.5\" font-weight=\"\(r.selected ? 500 : 400)\" fill=\"\(RepoMenuStyle.name)\">\(esc(fit(r.name, nameW, 11.5, medium: r.selected)))</text>"
+            s += "<text x=\"\(f(x + w - p))\" y=\"\(f(cy + 15))\" text-anchor=\"end\" font-size=\"11.5\" fill=\"\(RepoMenuStyle.count)\">\(r.count)</text>"
+            cy += RepoMenuLayout.row
+        }
+        return s
+    }
 
     /// D25: the resting panel (same content as the app's RestPanel): legend, storage bar and labels, and the
     /// 2 × 4 summary grid, all from RestLayout. Returns its content frames and legend measures.

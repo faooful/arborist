@@ -29,6 +29,16 @@ final class AppSurfaceTests: XCTestCase, @unchecked Sendable {
         _ = (StripLayout.padding, StripLayout.row, StripLayout.buttons.indices, StripLayout.buttons[0].name, StripLayout.buttons[0].x, StripLayout.buttons[0].w)
         _ = (PopoverLayout.stripHeight, PopoverLayout.stripGap, PopoverLayout.footerHeight, PopoverLayout.stripFade, StripLayout.rows.count, StripLayout.columns, StripLayout.frames(in: Rect(x: 0, y: 0, w: 1, h: 1)), LeafPalette.ring, LeafPalette.ringHover, LeafPalette.ringPinned)
         _ = (LeafMap.hitRadius, map.hit(at: Pt(1, 1)))
+        // D26: header frames, repo menu panel.
+        let hf = HeaderLayout.frames(count: HeaderLayout.count(result), sub: HeaderLayout.sub(result), filter: HeaderLayout.filterLabel(RepoFilter(), repos: result.repos))
+        _ = (hf[0].rect, hf[3].rect.x, HeaderLayout.filterButton(hf).w, HeaderLayout.countSize, HeaderLayout.subSize, HeaderLayout.filterSize, HeaderLayout.statusSide)
+        _ = (HeaderLayout.status(progress: nil, cached: true), RepoMenuLayout.origin(filterButton: HeaderLayout.filterButton(hf)).x, RepoMenuLayout.width,
+             RepoMenuLayout.padding, RepoMenuLayout.topRow, RepoMenuLayout.search, RepoMenuLayout.row, RepoMenuLayout.maxRows, RepoMenuLayout.checkSide)
+        let mc = RepoMenuStyle.checks()
+        _ = (mc.first?.fails, RepoMenuStyle.ratio(RepoMenuStyle.name, RepoMenuStyle.background), RepoMenuStyle.background, RepoMenuStyle.stroke,
+             RepoMenuStyle.name, RepoMenuStyle.count, RepoMenuStyle.hint, RepoMenuStyle.selectedCheck, RepoMenuStyle.uncheckedBox)
+        _ = RepoMenuStyle.Contrast(what: "x", fg: "#000000", bg: "#ffffff", ratio: 21, minimum: 4.5)
+        _ = HoverSweep.Report([], header: [LegendMeasure(label: "x", natural: 1, frame: Rect(x: 0, y: 0, w: 2, h: 2))], menu: mc).headerTruncations
         // D24
         let drawn = HoverSweep.Drawn(mapFrame: Rect(x: 0, y: 0, w: 1, h: 1), stripHeight: 0, stripFrames: nil)
         _ = (StripLayout.row("title"), HoverSweep.Step.escape,

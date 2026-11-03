@@ -83,18 +83,28 @@ struct PopoverView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                // "40 worktrees in 34 repos · 5 stale"
-                let parts = (model.result?.headline ?? "— worktrees").split(separator: " ", maxSplits: 2).map(String.init)
-                Text(parts.prefix(2).joined(separator: " ")).font(.system(size: 22, weight: .regular)).foregroundColor(Theme.ink)
-                if parts.count > 2 { Text(parts[2]).font(.system(size: 13)).foregroundColor(Theme.ink2) }
-                if let all = model.scanned?.repos, !all.isEmpty {
-                    RepoFilterButton(repos: all).padding(.leading, 6)
+            // D26: the header from HeaderLayout's fixed frames: count, stale, repo filter, status icon. Each
+            // text at its natural width (nothing truncates); the scan status text lives in the footer.
+            let hf = headerFrames
+            ZStack(alignment: .topLeading) {
+                HeaderText(text: hf.count, size: HeaderLayout.countSize, color: Theme.ink, frame: hf.frames[0].rect, alignment: .bottomLeading)
+                if !hf.sub.isEmpty {
+                    HeaderText(text: hf.sub, size: HeaderLayout.subSize, color: Theme.ink2, frame: hf.frames[1].rect, alignment: .bottomLeading)
                 }
-                Spacer()
-                Text(statusText).font(.system(size: 11.5)).foregroundColor(Theme.ink2)
-                    .accessibilityLabel(statusText)
+                if let all = model.scanned?.repos, !all.isEmpty {
+                    RepoFilterButton(repos: all, label: hf.filter, textFrame: hf.frames[2].rect)
+                        .frame(width: HeaderLayout.filterButton(hf.frames).w, height: 18, alignment: .leading)
+                        .padding(EdgeInsets(top: hf.frames[2].rect.y, leading: hf.frames[2].rect.x, bottom: 0, trailing: 0))
+                }
+                Image(systemName: model.scanning ? "arrow.triangle.2.circlepath" : (model.resultIsCached ? "clock" : "checkmark.circle"))
+                    .font(.system(size: 12)).foregroundColor(Theme.ink2)
+                    .frame(width: HeaderLayout.statusSide, height: HeaderLayout.statusSide)
+                    .help(statusText.isEmpty ? "Up to date" : statusText)
+                    .accessibilityLabel(statusText.isEmpty ? "Up to date" : statusText)
+                    .padding(EdgeInsets(top: hf.frames[3].rect.y, leading: hf.frames[3].rect.x, bottom: 0, trailing: 0))
             }
+            .frame(width: PopoverLayout.mapWidth, alignment: .topLeading)
+            .onPreferenceChange(HeaderMeasureKey.self) { model.hover.drawnHeader = $0.isEmpty ? nil : $0 }
             .frame(height: PopoverLayout.headerHeight)
             // D24: the scan error sits over the map's top edge, so the popover's height never changes.
             Group {
@@ -155,7 +165,9 @@ struct PopoverView: View {
                 Button(model.showList ? "Hide list" : "List") { model.router.perform(.list) }
                     .buttonStyle(HoverButtonStyle(kind: .link))
                     .reportFrame(FooterFramesKey.self)
-                Spacer()
+                // D26: the scan status text, moved here from the header (where it truncated).
+                Text(statusText).font(.system(size: 10.5)).foregroundColor(Theme.ink2).lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .trailing).padding(.trailing, 4)
                 Button { model.router.perform(.settings) } label: { Image(systemName: "gearshape").font(.system(size: 13)) }
                     .buttonStyle(HoverButtonStyle(kind: .icon))
                     .help("Settings")
@@ -179,9 +191,24 @@ struct PopoverView: View {
         .fixedSize(horizontal: false, vertical: true) // height = the content's ideal height, never squeezed
         .background(Theme.paper)
         .coordinateSpace(name: PopoverCoords.name)
-        // Esc clears the selection (D22, D25). A hidden cancel button, since the map itself rarely has key focus in the popover.
+        // D26: the repo menu as an opaque in-popover panel over the map; a click outside or Esc closes it.
+        .overlay(alignment: .topLeading) {
+            if model.repoMenuOpen, let all = model.scanned?.repos, !all.isEmpty {
+                let o = RepoMenuLayout.origin(filterButton: HeaderLayout.filterButton(headerFrames.frames))
+                ZStack(alignment: .topLeading) {
+                    Color.black.opacity(0.001).contentShape(Rectangle()).onTapGesture { model.repoMenuOpen = false }
+                    RepoMenuPanel(repos: all)
+                        .padding(EdgeInsets(top: PopoverLayout.padding + o.y, leading: PopoverLayout.padding + o.x, bottom: 0, trailing: 0))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+        }
+        // D26: always the app's light palette, whatever the system appearance (popover, menu, sheet).
+        .environment(\.colorScheme, .light)
+        .preferredColorScheme(.light)
+        // Esc closes the repo menu, else clears the selection (D22, D25). A hidden cancel button, since the map itself rarely has key focus in the popover.
         .background {
-            Button("") { model.hover.unpin() }.keyboardShortcut(.cancelAction).opacity(0).allowsHitTesting(false)
+            Button("") { if model.repoMenuOpen { model.repoMenuOpen = false } else { model.hover.unpin() } }.keyboardShortcut(.cancelAction).opacity(0).allowsHitTesting(false)
                 .accessibilityHidden(true)
         }
         .background {
@@ -193,15 +220,20 @@ struct PopoverView: View {
         })
         .sheet(item: Binding(get: { model.pendingCleanup.map(CleanupBatch.init) }, set: { if $0 == nil { model.pendingCleanup = nil } })) { batch in
             CleanupConfirmSheet(items: batch.items)
+                .background(Theme.paper).environment(\.colorScheme, .light) // D26: opaque, light
         }
     }
 
-    /// "12/34 repos" while scanning, "Cached · refreshing" for a cached scan, else "Arborist".
-    private var statusText: String {
-        if let p = model.progressLabel { return model.resultIsCached ? "Cached · \(p)" : p }
-        if model.resultIsCached { return "Cached" }
-        return "Arborist"
+    /// D26: "34/35 repos" while scanning, "Cached · 34/35 repos" for a cached scan being refreshed, "Cached", or empty.
+    /// D26: the header's texts and fixed frames.
+    private var headerFrames: (count: String, sub: String, filter: String, frames: [(name: String, text: String, rect: Rect)]) {
+        let c = model.result.map(HeaderLayout.count) ?? "— worktrees", sub = model.result.map(HeaderLayout.sub) ?? ""
+        let all = model.scanned?.repos ?? []
+        let f = all.isEmpty ? "" : HeaderLayout.filterLabel(model.filter, repos: all)
+        return (c, sub, f, HeaderLayout.frames(count: c, sub: sub, filter: f))
     }
+
+    private var statusText: String { HeaderLayout.status(progress: model.progressLabel, cached: model.resultIsCached) }
 
 }
 
@@ -478,70 +510,123 @@ extension StaleReason {
 /// and one checkbox per repo with its worktree count. Option-click a repo to show only that one.
 struct RepoFilterButton: View {
     @EnvironmentObject var model: AppModel
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let repos: [Repo]
-    @State private var open = false
-    @State private var query = ""
+    let label: String
+    let textFrame: Rect
 
     var body: some View {
-        Button { open.toggle() } label: {
+        Button { model.repoMenuOpen.toggle() } label: {
             HStack(spacing: 3) {
-                Text(model.filter.label(repos)).lineLimit(1).truncationMode(.middle)
-                Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
+                HeaderText(text: label, size: HeaderLayout.filterSize, color: Theme.ink2, frame: textFrame, alignment: .leading)
+                Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold)).foregroundColor(Theme.ink2)
             }
-            .font(.system(size: 11.5)).foregroundColor(Theme.ink2)
-            .frame(maxWidth: 140, alignment: .leading)
         }
-        .buttonStyle(HoverButtonStyle(kind: .link))
-        .accessibilityLabel("Repo filter: \(model.filter.label(repos))")
-        .popover(isPresented: $open, arrowEdge: .bottom) { menu }
+        .buttonStyle(HoverButtonStyle(kind: .link, height: 18))
+        .accessibilityLabel("Repo filter: \(label)")
     }
+}
+
+/// D26: the repo filter menu as an opaque panel in the light palette (RepoMenuStyle), drawn inside the
+/// popover over the map: readable names, real checkboxes, a selected state, hover rows in the shared style.
+struct RepoMenuPanel: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let repos: [Repo]
+    @State private var query = ""
 
     private func set(_ f: RepoFilter) {
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) { model.setFilter(f) }
     }
 
-    private var menu: some View {
-        VStack(alignment: .leading, spacing: 6) {
+    var body: some View {
+        let rows = RepoFilter.matching(repos, query: query)
+        let searching = repos.count > RepoFilter.searchThreshold
+        VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Button("All") { var f = model.filter; f.selectAll(); set(f) }
                 Button("None") { var f = model.filter; f.selectNone(repos); set(f) }
                 Spacer()
-                Text("⌥-click: only").font(.system(size: 10)).foregroundColor(Theme.ink2)
+                Text("⌥-click: only").font(.system(size: 10)).foregroundColor(Color(hex: RepoMenuStyle.hint))
             }
-            .buttonStyle(HoverButtonStyle(kind: .link)).font(.system(size: 11))
-            if repos.count > RepoFilter.searchThreshold {
+            .buttonStyle(HoverButtonStyle(kind: .link)).foregroundColor(Color(hex: RepoMenuStyle.name))
+            .frame(height: RepoMenuLayout.topRow)
+            if searching {
                 TextField("Search repos", text: $query).textFieldStyle(.roundedBorder).font(.system(size: 11))
+                    .frame(height: RepoMenuLayout.search)
             }
-            Divider()
+            Rectangle().fill(Color(hex: RepoMenuStyle.stroke)).frame(height: 1).padding(.vertical, 4)
             ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(RepoFilter.matching(repos, query: query), id: \.path) { repo in
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(rows, id: \.path) { repo in
+                        let on = model.filter.includes(repo)
                         Button {
                             var f = model.filter
                             if NSEvent.modifierFlags.contains(.option) { f.only(repo.path, among: repos) } else { f.toggle(repo.path) }
                             set(f)
                         } label: {
                             HStack(spacing: 6) {
-                                Image(systemName: model.filter.includes(repo) ? "checkmark.square.fill" : "square")
-                                    .foregroundColor(model.filter.includes(repo) ? Theme.ink : Theme.ink2)
-                                Text(repo.name).lineLimit(1).truncationMode(.middle).foregroundColor(Theme.ink)
-                                Spacer()
-                                Text("\(repo.worktrees.count)").monospacedDigit().foregroundColor(Theme.ink2)
+                                ZStack {
+                                    if on {
+                                        RoundedRectangle(cornerRadius: 3).fill(Color(hex: RepoMenuStyle.selectedCheck))
+                                        Image(systemName: "checkmark").font(.system(size: 8, weight: .bold)).foregroundColor(.white)
+                                    } else {
+                                        RoundedRectangle(cornerRadius: 3).stroke(Color(hex: RepoMenuStyle.uncheckedBox), lineWidth: 1)
+                                    }
+                                }
+                                .frame(width: RepoMenuLayout.checkSide, height: RepoMenuLayout.checkSide)
+                                Text(repo.name).fontWeight(on ? .medium : .regular).lineLimit(1).truncationMode(.middle)
+                                    .foregroundColor(Color(hex: RepoMenuStyle.name))
+                                Spacer(minLength: 4)
+                                Text("\(repo.worktrees.count)").monospacedDigit().foregroundColor(Color(hex: RepoMenuStyle.count))
                             }
                             .font(.system(size: 11.5))
+                            .frame(maxWidth: .infinity, minHeight: RepoMenuLayout.row, alignment: .leading)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(HoverButtonStyle(kind: .link, height: nil))
                         .help(repo.path)
-                        .accessibilityLabel("\(repo.name), \(repo.worktrees.count) worktrees, \(model.filter.includes(repo) ? "shown" : "hidden")")
+                        .accessibilityLabel("\(repo.name), \(repo.worktrees.count) worktrees, \(on ? "shown" : "hidden")")
                     }
                 }
             }
-            .frame(maxHeight: 280)
+            .frame(height: CGFloat(min(rows.count, RepoMenuLayout.maxRows)) * RepoMenuLayout.row)
         }
-        .padding(10)
-        .frame(width: 240)
+        .padding(RepoMenuLayout.padding)
+        .frame(width: RepoMenuLayout.width, alignment: .topLeading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(hex: RepoMenuStyle.background))
+            .shadow(color: .black.opacity(0.18), radius: 8, y: 3))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(hex: RepoMenuStyle.stroke), lineWidth: 0.8))
+        .environment(\.colorScheme, .light)
+        .reportFrame(RepoMenuFrameKey.self)
+        .onPreferenceChange(RepoMenuFrameKey.self) { model.hover.drawnRepoMenu = $0.first }
     }
+}
+
+/// D26: one header text at its natural width in its HeaderLayout frame; reports natural vs frame (sweep).
+struct HeaderText: View {
+    let text: String, size: Double, color: Color, frame: Rect
+    var alignment: Alignment = .leading
+    @State private var natural = 0.0
+    var body: some View {
+        Text(text).font(.system(size: size)).foregroundColor(color).lineLimit(1)
+            .frame(width: frame.w, height: frame.h, alignment: alignment)
+            .background(Text(text).font(.system(size: size)).fixedSize().hidden()
+                .background(GeometryReader { g in Color.clear.preference(key: NaturalWidthKey.self, value: g.size.width) }))
+            .onPreferenceChange(NaturalWidthKey.self) { natural = $0 }
+            .background(GeometryReader { g in
+                let f = g.frame(in: .named(PopoverCoords.name))
+                Color.clear.preference(key: HeaderMeasureKey.self,
+                                       value: [LegendMeasure(label: text, natural: natural, frame: Rect(x: f.minX, y: f.minY, w: f.width, h: f.height))])
+            })
+            .padding(EdgeInsets(top: alignment == .leading ? 0 : frame.y, leading: alignment == .leading ? 0 : frame.x, bottom: 0, trailing: 0))
+    }
+}
+struct HeaderMeasureKey: PreferenceKey {
+    static let defaultValue: [LegendMeasure] = []
+    static func reduce(value: inout [LegendMeasure], nextValue: () -> [LegendMeasure]) { value += nextValue() }
+}
+struct RepoMenuFrameKey: PreferenceKey {
+    static let defaultValue: [Rect] = []
+    static func reduce(value: inout [Rect], nextValue: () -> [Rect]) { value += nextValue() }
 }
 #endif
