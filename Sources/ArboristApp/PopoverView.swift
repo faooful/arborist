@@ -4,6 +4,27 @@ import ArboristCleanup
 import ArboristCore
 import SwiftUI
 
+/// D24: the fixed footer slot below the map. The footer fills it at rest; on hover or pin the detail strip
+/// fades (0.2 s, none with Reduce Motion) in over it, and the footer stops taking clicks. Its own view so
+/// pointer moves don't re-render the whole popover.
+struct FooterSlot<Content: View>: View {
+    @EnvironmentObject var hover: HoverModel
+    let result: ScanResult?
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        let shown = result != nil && hover.visible.strip != nil
+        VStack(alignment: .leading, spacing: 10) { content }
+            .frame(width: PopoverLayout.mapWidth, alignment: .topLeading)
+            .frame(minHeight: PopoverLayout.footerHeight, alignment: .topLeading)
+            .allowsHitTesting(!shown)
+            .accessibilityHidden(shown)
+            .overlay(alignment: .topLeading) {
+                if let r = result { DetailStrip(result: r) }
+            }
+    }
+}
+
 /// The whole app: a 480pt popover under the menu bar item. Worktree-first leaves (D9, D12).
 struct PopoverView: View {
     @EnvironmentObject var model: AppModel
@@ -55,39 +76,38 @@ struct PopoverView: View {
                     .font(.system(size: 11)).foregroundColor(Theme.ink2)
                     .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.mapHeight) // same layout in every state (D17)
             }
-            // D22: the detail strip, docked below the map, the same fixed size in every state.
-            if let r = model.result, model.leafMap != nil, !model.filterHidesEverything, !model.nothingMatches {
-                DetailStrip(result: r)
-            } else {
-                Color.clear.frame(width: PopoverLayout.mapWidth, height: PopoverLayout.stripHeight)
+            // D24: the footer (key, free bar, buttons) sits in a fixed slot below the map; the detail strip
+            // takes no space at rest and slides in over that slot on hover or pin, so neither the map nor the
+            // popover ever moves or resizes.
+            FooterSlot(result: model.leafMap != nil && !model.filterHidesEverything && !model.nothingMatches ? model.result : nil) {
+                HStack { Key(); Spacer(minLength: 4); Text(model.result.flatMap { Format.cachesTotal($0.caches) } ?? "").font(.system(size: 11)).foregroundColor(Theme.ink2).lineLimit(1).layoutPriority(-1) }
+                FreeBar(free: model.freeBytes ?? 0, total: model.result?.volume?.totalBytes ?? 0)
+                HStack(spacing: 8) {
+                    let n = model.clearPlan.count
+                    Button(model.cleaning ? "Clearing…" : "Clear \(n)") { model.requestClear() }
+                        .buttonStyle(HoverButtonStyle(kind: .dark))
+                        .disabled(n == 0 || model.cleaning)
+                        .help("Removes \(n) merged or upstream-gone worktrees with nothing uncommitted or unpushed. Asks first; branches are kept.")
+                    // D22: Rescan, List, Settings and Quit go through the action router.
+                    Button(model.scanning ? "Scanning…" : "Rescan") { model.router.perform(.rescan) }
+                        .buttonStyle(HoverButtonStyle(kind: .link))
+                        .disabled(!model.router.isEnabled(.rescan))
+                        .help("Scan every folder again, ignoring the cache")
+                    Button(model.showList ? "Hide list" : "List") { model.router.perform(.list) }
+                        .buttonStyle(HoverButtonStyle(kind: .link))
+                    Spacer()
+                    Button { model.router.perform(.settings) } label: { Image(systemName: "gearshape").font(.system(size: 13)) }
+                        .buttonStyle(HoverButtonStyle(kind: .icon))
+                        .help("Settings")
+                        .accessibilityLabel("Settings")
+                    Button { model.router.perform(.quit) } label: { Image(systemName: "power").font(.system(size: 13)) }
+                        .buttonStyle(HoverButtonStyle(kind: .icon))
+                        .help("Quit Arborist")
+                        .accessibilityLabel("Quit Arborist")
+                }
+                .font(.system(size: 11))
+                .foregroundColor(Theme.ink2)
             }
-            HStack { Key(); Spacer(minLength: 4); Text(model.result.flatMap { Format.cachesTotal($0.caches) } ?? "").font(.system(size: 11)).foregroundColor(Theme.ink2).lineLimit(1).layoutPriority(-1) }
-            FreeBar(free: model.freeBytes ?? 0, total: model.result?.volume?.totalBytes ?? 0)
-            HStack(spacing: 8) {
-                let n = model.clearPlan.count
-                Button(model.cleaning ? "Clearing…" : "Clear \(n)") { model.requestClear() }
-                    .buttonStyle(HoverButtonStyle(kind: .dark))
-                    .disabled(n == 0 || model.cleaning)
-                    .help("Removes \(n) merged or upstream-gone worktrees with nothing uncommitted or unpushed. Asks first; branches are kept.")
-                // D22: Rescan, List, Settings and Quit go through the action router.
-                Button(model.scanning ? "Scanning…" : "Rescan") { model.router.perform(.rescan) }
-                    .buttonStyle(HoverButtonStyle(kind: .link))
-                    .disabled(!model.router.isEnabled(.rescan))
-                    .help("Scan every folder again, ignoring the cache")
-                Button(model.showList ? "Hide list" : "List") { model.router.perform(.list) }
-                    .buttonStyle(HoverButtonStyle(kind: .link))
-                Spacer()
-                Button { model.router.perform(.settings) } label: { Image(systemName: "gearshape").font(.system(size: 13)) }
-                    .buttonStyle(HoverButtonStyle(kind: .icon))
-                    .help("Settings")
-                    .accessibilityLabel("Settings")
-                Button { model.router.perform(.quit) } label: { Image(systemName: "power").font(.system(size: 13)) }
-                    .buttonStyle(HoverButtonStyle(kind: .icon))
-                    .help("Quit Arborist")
-                    .accessibilityLabel("Quit Arborist")
-            }
-            .font(.system(size: 11))
-            .foregroundColor(Theme.ink2)
             if model.showList, let r = model.result { Checklist(result: r).frame(maxHeight: 260) }
             if let results = model.cleanupResults { CleanupResultsView(results: results) }
         }

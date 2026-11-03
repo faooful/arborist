@@ -12,6 +12,8 @@ final class HoverModel: ObservableObject {
     var reduceMotion = false
     /// Sweep hook: every change applies with no animation, so a captured frame is the settled state.
     var instant = false
+    /// D24: the strip's text and button frames as SwiftUI drew them (popover coordinates); nil while hidden.
+    var drawnStripFrames: [Rect]?
     /// One pending leave timer at a time; a newer event cancels it. A main-actor Task, so the timer
     /// never touches this model off the main actor.
     private var settleWork: Task<Void, Never>?

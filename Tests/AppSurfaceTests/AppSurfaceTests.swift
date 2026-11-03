@@ -30,8 +30,12 @@ final class AppSurfaceTests: XCTestCase, @unchecked Sendable {
         let tip = LeafTooltip(card)
         _ = (tip.branch, tip.repo, tip.size, TooltipPlacement.size.x, TooltipPlacement.place(pointer: Pt(1, 1), in: Pt(480, 600)))
         _ = (StripLayout.padding, StripLayout.row, StripLayout.buttons.indices, StripLayout.buttons[0].name, StripLayout.buttons[0].x, StripLayout.buttons[0].w)
-        _ = (PopoverLayout.stripHeight, PopoverLayout.stripGap, LeafPalette.ring, LeafPalette.ringHover, LeafPalette.ringPinned)
+        _ = (PopoverLayout.stripHeight, PopoverLayout.stripGap, PopoverLayout.footerHeight, PopoverLayout.stripFade, StripLayout.rows.count, StripLayout.columns, StripLayout.frames(in: Rect(x: 0, y: 0, w: 1, h: 1)), LeafPalette.ring, LeafPalette.ringHover, LeafPalette.ringPinned)
         _ = (LeafMap.hitRadius, map.hit(at: Pt(1, 1)))
+        // D24
+        let drawn = HoverSweep.Drawn(mapFrame: Rect(x: 0, y: 0, w: 1, h: 1), stripHeight: 0, stripFrames: nil)
+        _ = (StripLayout.row("title"), HoverSweep.Step.escape,
+             HoverSweep.frame(0, pointer: nil, last: Pt(0, 0), t: 0, tracker: tracker, map: map, drawn: drawn))
         let mt = MapTransform.fit(map, into: Pt(448, 400))
         _ = (MapTransform.usable(map, into: Pt(448, 400)), PopoverLayout.width, PopoverLayout.padding, PopoverLayout.mapWidth, PopoverLayout.mapHeight, PopoverLayout.minMapSide)
         _ = (mt.toView(Pt(1, 1)), mt.toMap(Pt(1, 1)), mt.scale, mt.dx, mt.dy, MapTransform.identity, map.hit(view: Pt(1, 1), mt))
@@ -68,8 +72,8 @@ final class AppSurfaceTests: XCTestCase, @unchecked Sendable {
         _ = (sp.toPopover(Pt(1, 1)), sp.toMap(Pt(1, 1)), sp.stripRect, sp.clips(Rect(x: 0, y: 0, w: 1, h: 1)), LeafSVG.popoverSpace(map), LeafSVG.svgSize(map))
         tracker.space = sp; _ = tracker.space
         let (steps, pin) = HoverSweep.steps(map, space: sp)
-        for s in steps { switch s { case .move(let p), .click(let p): _ = (p, HoverSweep.onMap(p, map)); case .leave: break } }
-        _ = (pin, rep.stripMismatches, rep.tooltipClipped, rep.reachFailures, rep.buttonHits)
+        for s in steps { switch s { case .move(let p), .click(let p): _ = (p, HoverSweep.onMap(p, map)); case .leave, .escape: break } }
+        _ = (pin, rep.stripMismatches, rep.tooltipClipped, rep.reachFailures, rep.buttonHits, rep.idleStripViolations, rep.mapFrameShifts, rep.stripLayoutShifts)
         _ = (PopoverAction.allCases, PopoverActionOutcome.fired(.list).log, SettingsOpening.steps(osMajor: 14),
              SettingsOpening.shouldBecomeAccessory(otherVisibleWindows: 0))
         for st in SettingsOpening.steps(osMajor: 13) {

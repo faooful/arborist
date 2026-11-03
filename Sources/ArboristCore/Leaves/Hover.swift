@@ -355,9 +355,12 @@ public enum HoverSweep {
                      pinned: tracker.pinned, strip: tracker.strip, underPointer: truth, inGap: gap,
                      snappedTo: gap ? map.hit(at: q)?.item.id : nil, pinTruth: pinTruth, tooltipRect: rect,
                      tooltipClipped: clipped, buttonUnderPointer: button, reachTarget: reachTarget)
-        if let d = drawn { fr.stripHeight = d.stripHeight; fr.mapFrame = d.mapFrame; fr.stripFrames = d.stripFrames }
+        if let d = drawn { fr.stripHeight = d.stripHeight; fr.mapFrame = d.mapFrame; fr.stripFrames = d.stripFrames.map(Self.sorted) }
         return fr
     }
+
+    /// D24: frames in reading order, so renderers that report in any order compare equal.
+    public static func sorted(_ r: [Rect]) -> [Rect] { r.sorted { ($0.y, $0.x, $0.w, $0.h) < ($1.y, $1.x, $1.w, $1.h) } }
 
     /// D24: what the renderer (SVG in the CLI, SwiftUI in the app) actually drew for a frame.
     public struct Drawn: Equatable, Sendable {

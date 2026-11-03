@@ -173,8 +173,9 @@ struct LeafCanvas: View {
     }
 }
 
-/// D22: the detail strip docked below the map, fixed size so the popover never resizes. Shows the pinned
-/// leaf, else the hovered one, else a hint. Its buttons sit at Core's StripLayout frames (the sweep checks them).
+/// D24: the detail strip. Nothing at rest; on hover or pin it fades in (0.2 s, none with Reduce Motion) over
+/// the fixed footer slot below the map. Shows the pinned leaf, else the hovered one. Fixed rows and columns
+/// from Core's StripLayout: only the values swap, single-line and truncated, with no animation on content.
 struct DetailStrip: View {
     @EnvironmentObject var hover: HoverModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -185,19 +186,37 @@ struct DetailStrip: View {
         let ref = v.strip.flatMap { WorktreeList.find(result, path: $0) }
         ZStack(alignment: .topLeading) {
             if let ref {
-                StripContent(card: HoverCard(ref), ref: ref, pinned: v.pinned != nil).id(ref.worktree.path).transition(.opacity)
-            } else {
-                Text("Hover a leaf for details · click to pin")
-                    .font(.system(size: 11)).foregroundColor(Theme.ink2)
-                    .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.stripHeight)
+                StripContent(card: HoverCard(ref), ref: ref, pinned: v.pinned != nil)
+                    .transaction { $0.animation = nil } // values swap in place, never animate
+                    .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.stripHeight, alignment: .topLeading)
+                    .background(RoundedRectangle(cornerRadius: 9).fill(Color(hex: LeafPalette.cardFill)))
+                    .overlay(RoundedRectangle(cornerRadius: 9)
+                        .stroke(v.pinned != nil ? Color(hex: LeafPalette.ring) : Color(hex: LeafPalette.cardStroke), lineWidth: v.pinned != nil ? 1.2 : 0.6))
                     .transition(.opacity)
             }
         }
-        .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.stripHeight, alignment: .topLeading)
-        .background(RoundedRectangle(cornerRadius: 9).fill(Color(hex: LeafPalette.cardFill)))
-        .overlay(RoundedRectangle(cornerRadius: 9)
-            .stroke(v.pinned != nil ? Color(hex: LeafPalette.ring) : Color(hex: LeafPalette.cardStroke), lineWidth: v.pinned != nil ? 1.2 : 0.6))
-        .animation(reduceMotion || hover.instant ? nil : .easeInOut(duration: 0.12), value: v.strip)
+        .frame(width: PopoverLayout.mapWidth, alignment: .topLeading)
+        .animation(reduceMotion || hover.instant ? nil : .easeInOut(duration: PopoverLayout.stripFade), value: ref != nil)
+        .onPreferenceChange(StripFramesKey.self) { hover.drawnStripFrames = $0.isEmpty ? nil : $0 }
+    }
+}
+
+/// D24: the strip's drawn text and button frames (popover coordinates), for the sweep.
+struct StripFramesKey: PreferenceKey {
+    static let defaultValue: [Rect] = []
+    static func reduce(value: inout [Rect], nextValue: () -> [Rect]) { value += nextValue() }
+}
+
+extension View {
+    /// D24: a fixed frame from StripLayout, reported to the sweep as drawn.
+    func stripFrame(_ r: Rect, alignment: Alignment = .topLeading) -> some View {
+        frame(width: r.w, height: r.h, alignment: alignment)
+            .clipped()
+            .background(GeometryReader { g in
+                let f = g.frame(in: .named(PopoverCoords.name))
+                Color.clear.preference(key: StripFramesKey.self, value: [Rect(x: f.minX, y: f.minY, w: f.width, h: f.height)])
+            })
+            .padding(EdgeInsets(top: r.y, leading: r.x, bottom: 0, trailing: 0)) // layout, so the geometry is real
     }
 }
 
@@ -209,44 +228,48 @@ struct StripContent: View {
     let pinned: Bool
 
     var body: some View {
-        let pad = StripLayout.padding
         ZStack(alignment: .topLeading) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 7) {
-                    Text(card.branch).font(.system(size: 12, weight: .semibold)).foregroundColor(Theme.ink).lineLimit(1)
-                    Text(card.pill).font(.system(size: 10, weight: .medium))
-                        .foregroundColor(Color(hex: LeafPalette.pillText(card.status)))
-                        .padding(.horizontal, 6).frame(height: 14)
-                        .background(Capsule().fill(Color(hex: LeafPalette.dot(card.status), opacity: 0.2)))
-                    Text(card.repo).font(.system(size: 11)).foregroundColor(Theme.ink2).lineLimit(1)
-                    Spacer(minLength: 4)
-                    if pinned {
-                        Button { hover.unpin() } label: { Text("Pinned · Esc").font(.system(size: 10)) }
-                            .buttonStyle(HoverButtonStyle(kind: .link, height: 16))
-                            .foregroundColor(Color(hex: LeafPalette.ring))
-                            .help("Unpin (Esc, or click empty space on the map)")
-                    }
+            HStack(spacing: 7) {
+                Text(card.branch).font(.system(size: 12, weight: .semibold)).foregroundColor(Theme.ink)
+                    .lineLimit(1).truncationMode(.middle).layoutPriority(1)
+                Text(card.pill).font(.system(size: 10, weight: .medium)).lineLimit(1).fixedSize()
+                    .foregroundColor(Color(hex: LeafPalette.pillText(card.status)))
+                    .padding(.horizontal, 6).frame(height: 14)
+                    .background(Capsule().fill(Color(hex: LeafPalette.dot(card.status), opacity: 0.2)))
+                Text(card.repo).font(.system(size: 11)).foregroundColor(Theme.ink2).lineLimit(1).truncationMode(.tail)
+                Spacer(minLength: 4)
+                if pinned {
+                    Button { hover.unpin() } label: { Text("Pinned · Esc").font(.system(size: 10)) }
+                        .buttonStyle(HoverButtonStyle(kind: .link, height: 16))
+                        .foregroundColor(Color(hex: LeafPalette.ring))
+                        .help("Unpin (Esc, or click empty space on the map)")
+                        .fixedSize()
                 }
-                Text(card.path).font(.system(size: 10, design: .monospaced)).foregroundColor(Theme.ink2).lineLimit(1)
-                    .help(card.fullPath)
-                HStack(spacing: 0) {
-                    stat("Size", card.size).help(card.rebuildable ?? "")
-                    stat("Changes", card.changes)
-                    stat("Sync", card.sync)
-                    stat("Last commit", card.lastCommit)
-                }
-                .padding(.top, 2)
-                Text(card.message.joined(separator: " ")).font(.system(size: 11)).foregroundColor(Theme.ink).lineLimit(1)
             }
-            .padding(.horizontal, pad).padding(.top, 8)
-            .frame(width: PopoverLayout.mapWidth, alignment: .leading)
+            .stripFrame(StripLayout.row("title"), alignment: .leading)
+            Text(card.path).font(.system(size: 10, design: .monospaced)).foregroundColor(Theme.ink2)
+                .lineLimit(1).truncationMode(.middle).help(card.fullPath)
+                .stripFrame(StripLayout.row("path"), alignment: .leading)
+            Color.clear.stripFrame(StripLayout.row("stats"))
+            let stats = [("Size", card.size), ("Changes", card.changes), ("Sync", card.sync), ("Last commit", card.lastCommit)]
+            ForEach(stats.indices, id: \.self) { k in
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(stats[k].0).font(.system(size: 10)).foregroundColor(Theme.ink2).lineLimit(1)
+                    Text(stats[k].1).font(.system(size: 11.5, weight: .medium).monospacedDigit()).foregroundColor(Theme.ink)
+                        .lineLimit(1).truncationMode(.tail)
+                }
+                .help(k == 0 ? (card.rebuildable ?? "") : "")
+                .stripFrame(StripLayout.columns[k])
+            }
+            Text(card.message.joined(separator: " ")).font(.system(size: 11)).foregroundColor(Theme.ink)
+                .lineLimit(1).truncationMode(.tail)
+                .stripFrame(StripLayout.row("message"), alignment: .leading)
             // Fixed frames from StripLayout (the sweep's reach path ends on the first one).
-            let y = PopoverLayout.stripHeight - pad - StripLayout.row
+            let y = PopoverLayout.stripHeight - StripLayout.padding - StripLayout.row
             ForEach(StripLayout.buttons.indices, id: \.self) { i in
                 let b = StripLayout.buttons[i]
                 button(b.name)
-                    .frame(width: b.w, height: StripLayout.row)
-                    .offset(x: pad + b.x, y: y)
+                    .stripFrame(Rect(x: StripLayout.padding + b.x, y: y, w: b.w, h: StripLayout.row), alignment: .center)
             }
         }
         .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.stripHeight, alignment: .topLeading)
@@ -264,14 +287,6 @@ struct StripContent: View {
         default:
             RemoveButton(ref: ref, showReason: false).buttonStyle(HoverButtonStyle())
         }
-    }
-
-    private func stat(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(label).font(.system(size: 10)).foregroundColor(Theme.ink2)
-            Text(value).font(.system(size: 11.5, weight: .medium)).foregroundColor(Theme.ink).lineLimit(1)
-        }
-        .frame(width: (PopoverLayout.mapWidth - 2 * StripLayout.padding) / 4, alignment: .leading)
     }
 }
 
