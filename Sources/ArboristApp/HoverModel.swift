@@ -42,6 +42,8 @@ final class HoverModel: ObservableObject {
         settleWork?.cancel()
         tracker.move(to: Pt(p.x, p.y), in: map, at: t ?? Self.now())
         publish(animated)
+        // D16: in a far gap the tracker sets a clear deadline; the same cancellable timer applies it.
+        if tracker.clearAt != nil { scheduleSettle(animated) }
     }
 
     /// Pointer left the map: clear after the grace period unless it comes back.
@@ -79,7 +81,8 @@ final class HoverModel: ObservableObject {
 
     private func scheduleSettle(_ animated: Bool) {
         settleWork?.cancel()
-        let delay = UInt64((HoverTracker.leaveDelay + 0.005) * 1_000_000_000)
+        let remaining = max(0, (tracker.clearAt ?? (Self.now() + HoverTracker.leaveDelay)) - Self.now())
+        let delay = UInt64((remaining + 0.005) * 1_000_000_000)
         settleWork = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: delay)
             guard !Task.isCancelled else { return }
