@@ -86,15 +86,18 @@ case "render":
     // --hover N (leaf index) or --hover PATH (a worktree path).
     let hover = hoverArg.flatMap { a in Int(a).flatMap { $0 < map.leaves.count ? map.leaves[$0].item.id : nil } ?? map.leaves.first { $0.item.id == a }?.item.id }
     svg = LeafSVG.popover(r, map: map, note: sample ? "sample data · Linux render" : "Linux render", hover: hover,
-                          now: sample ? LeafSample.now : Date())
+                          now: sample ? LeafSample.now : Date(), showAll: !states.isAll)
     if let dir = sweepDir {
         // Same HoverTracker path as the app's mouse tracking (D15): frame-NNN.svg plus frames.json.
         try! FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        var previous: String? = nil
         let frames = HoverSweep.run(map, space: LeafSVG.popoverSpace(map)) { i, t, p in
             let svg = LeafSVG.popover(r, map: map, note: "hover sweep · frame \(i)", hover: t.hovered, pinned: t.pinned,
-                                      now: sample ? LeafSample.now : Date(), pointer: p, tooltipAt: t.tooltipOrigin)
+                                      now: sample ? LeafSample.now : Date(), pointer: p, showAll: !states.isAll)
             try! svg.write(toFile: dir + String(format: "/frame-%03d.svg", i), atomically: true, encoding: .utf8)
-            return LeafSVG.drawn(r, map: map, hover: t.hovered, pinned: t.pinned, now: sample ? LeafSample.now : Date())
+            defer { previous = t.strip }
+            return LeafSVG.drawn(r, map: map, hover: t.hovered, pinned: t.pinned, now: sample ? LeafSample.now : Date(),
+                                 showAll: !states.isAll, previousStrip: .some(previous))
         }
         let report = HoverSweep.Report(frames, cases: LayoutCase.all(r, map: map, now: sample ? LeafSample.now : Date()))
         try! HoverSweep.json(report).write(to: URL(fileURLWithPath: dir + "/frames.json"))

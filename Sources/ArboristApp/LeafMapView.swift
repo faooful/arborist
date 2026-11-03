@@ -8,7 +8,7 @@ import SwiftUI
 /// Hover (D15): `HoverModel` is the only source of truth, fed by `MouseTracking` (an NSTrackingArea, because
 /// SwiftUI hover didn't fire in the MenuBarExtra window). The pointer always maps to the leaf under it at once
 /// (D22: no corridor, grace or dwell); in a far gap or off the map hover clears after 80 ms (D16). The hovered
-/// leaf gets a ring, a tooltip follows the pointer, and the docked DetailStrip below the map shows the pinned
+/// leaf gets a ring, and the docked DetailStrip below the map shows the pinned
 /// or hovered leaf. Click pins; Esc or empty space unpins. Reduce Motion: no fades.
 struct LeafMapView: View {
     @EnvironmentObject var model: AppModel
@@ -38,7 +38,7 @@ struct LeafMapView: View {
             }
         }
         .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.mapHeight)
-        // Only the leaf drawing is clipped; the tooltip is drawn by TooltipOverlay above the popover (D22).
+        // Only the leaf drawing is clipped (D22; D25: no tooltip).
         .clipped()
         .background(GeometryReader { g in
             Color.clear
@@ -95,35 +95,6 @@ struct LeafRings: View {
             }
         }
         .frame(width: map.width, height: map.height)
-    }
-}
-
-/// D22: the tooltip that follows the pointer (branch, repo, size). Drawn in an overlay on the popover root,
-/// placed by Core against the whole popover; it never takes hit-testing.
-struct TooltipOverlay: View {
-    @EnvironmentObject var hover: HoverModel
-    let result: ScanResult
-
-    var body: some View {
-        let v = hover.visible
-        ZStack(alignment: .topLeading) {
-            if let id = v.hovered, let o = v.tooltipOrigin, let ref = WorktreeList.find(result, path: id) {
-                let t = LeafTooltip(HoverCard(ref))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(t.branch).font(.system(size: 11.5, weight: .semibold)).foregroundColor(Theme.ink).lineLimit(1)
-                    Text(t.repo).font(.system(size: 10.5)).foregroundColor(Theme.ink2).lineLimit(1)
-                    Text(t.size).font(.system(size: 10.5)).foregroundColor(Theme.ink).lineLimit(1)
-                }
-                .padding(.horizontal, 8)
-                .frame(width: TooltipPlacement.size.x, height: TooltipPlacement.size.y, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 6).fill(Color(hex: LeafPalette.cardFill)).shadow(color: .black.opacity(0.12), radius: 4, y: 2))
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(hex: LeafPalette.cardStroke), lineWidth: 0.6))
-                .offset(x: o.x, y: o.y)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
     }
 }
 
@@ -186,17 +157,17 @@ struct DetailStrip: View {
         let ref = v.strip.flatMap { WorktreeList.find(result, path: $0) }
         ZStack(alignment: .topLeading) {
             if let ref {
-                StripContent(card: HoverCard(ref), ref: ref, pinned: v.pinned != nil)
+                StripContent(card: HoverCard(ref), ref: ref)
                     .transaction { $0.animation = nil } // values swap in place, never animate
                     .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.stripHeight, alignment: .topLeading)
                     .background(RoundedRectangle(cornerRadius: 9).fill(Color(hex: LeafPalette.cardFill)))
                     .overlay(RoundedRectangle(cornerRadius: 9)
-                        .stroke(v.pinned != nil ? Color(hex: LeafPalette.ring) : Color(hex: LeafPalette.cardStroke), lineWidth: v.pinned != nil ? 1.2 : 0.6))
+                        .stroke(v.pinned != nil ? Color(hex: LeafPalette.ring) : Color(hex: LeafPalette.cardStroke), lineWidth: v.pinned != nil ? 2 : 0.6)) // D25: selected = stronger outline
                     .transition(.opacity)
             }
         }
         .frame(width: PopoverLayout.mapWidth, alignment: .topLeading)
-        .animation(reduceMotion || hover.instant ? nil : .easeInOut(duration: PopoverLayout.stripFade), value: ref != nil)
+        .animation(hover.panelTransition == .crossfade && !hover.instant ? .easeInOut(duration: PopoverLayout.stripFade) : nil, value: ref != nil)
         .onPreferenceChange(StripFramesKey.self) { hover.drawnStripFrames = $0.isEmpty ? nil : $0 }
     }
 }
@@ -225,13 +196,12 @@ struct StripContent: View {
     @EnvironmentObject var hover: HoverModel
     let card: HoverCard
     let ref: WorktreeRef
-    let pinned: Bool
 
     var body: some View {
-        let parts = StripLayout.named(in: Rect(x: 0, y: 0, w: 0, h: 0), branch: card.branch, tag: card.pill, repo: card.repo, pinned: pinned)
+        let parts = StripLayout.named(in: Rect(x: 0, y: 0, w: 0, h: 0), branch: card.branch, tag: card.pill, repo: card.repo)
         let at = { (n: String) in parts.first { $0.name == n }!.rect }
         ZStack(alignment: .topLeading) {
-            // Title row: branch, tag, repo (and the pin label), each in its own Core frame, truncated.
+            // Title row: branch, tag, repo, each in its own Core frame, truncated (D25: no pin label).
             Text(card.branch).font(.system(size: 12, weight: .semibold)).foregroundColor(Theme.ink)
                 .lineLimit(1).truncationMode(.middle).help(card.branch)
                 .stripFrame(at("branch"), alignment: .leading)
@@ -243,13 +213,6 @@ struct StripContent: View {
                 .stripFrame(at("tag"), alignment: .leading)
             Text(card.repo).font(.system(size: 11)).foregroundColor(Theme.ink2).lineLimit(1).truncationMode(.tail)
                 .stripFrame(at("repo"), alignment: .leading)
-            if pinned {
-                Button { hover.unpin() } label: { Text("Pinned · Esc").font(.system(size: 10)) }
-                    .buttonStyle(HoverButtonStyle(kind: .link, height: 16))
-                    .foregroundColor(Color(hex: LeafPalette.ring))
-                    .help("Unpin (Esc, or click empty space on the map)")
-                    .stripFrame(at("pinned"), alignment: .trailing)
-            }
             Text(card.path).font(.system(size: 10, design: .monospaced)).foregroundColor(Theme.ink2)
                 .lineLimit(1).truncationMode(.middle).help(card.fullPath)
                 .stripFrame(StripLayout.row("path"), alignment: .leading)
