@@ -191,6 +191,8 @@ struct PopoverView: View {
         .fixedSize(horizontal: false, vertical: true) // height = the content's ideal height, never squeezed
         .background(Theme.paper)
         .coordinateSpace(name: PopoverCoords.name)
+        // D27: while a confirm is open nothing beneath it (map, panel, footer) takes the pointer.
+        .allowsHitTesting(model.pendingCleanup == nil)
         // D26: the repo menu as an opaque in-popover panel over the map; a click outside or Esc closes it.
         .overlay(alignment: .topLeading) {
             if model.repoMenuOpen, let all = model.scanned?.repos, !all.isEmpty {
@@ -208,7 +210,8 @@ struct PopoverView: View {
         .preferredColorScheme(.light)
         // Esc closes the repo menu, else clears the selection (D22, D25). A hidden cancel button, since the map itself rarely has key focus in the popover.
         .background {
-            Button("") { if model.repoMenuOpen { model.repoMenuOpen = false } else { model.hover.unpin() } }.keyboardShortcut(.cancelAction).opacity(0).allowsHitTesting(false)
+            Button("") { if model.pendingCleanup != nil { return }; if model.repoMenuOpen { model.repoMenuOpen = false } else { model.hover.unpin() } }.keyboardShortcut(.cancelAction).opacity(0).allowsHitTesting(false)
+                .disabled(model.pendingCleanup != nil) // D27: the confirm owns Esc while open
                 .accessibilityHidden(true)
         }
         .background {
@@ -218,9 +221,24 @@ struct PopoverView: View {
             Color.clear.onAppear { model.hover.popoverSize = Pt(g.size.width, g.size.height) }
                 .onChange(of: g.size) { s in model.hover.popoverSize = Pt(s.width, s.height) }
         })
-        .sheet(item: Binding(get: { model.pendingCleanup.map(CleanupBatch.init) }, set: { if $0 == nil { model.pendingCleanup = nil } })) { batch in
-            CleanupConfirmSheet(items: batch.items)
-                .background(Theme.paper).environment(\.colorScheme, .light) // D26: opaque, light
+        // D27: the confirm is an in-popover overlay on top of everything (a .sheet on the menu bar popover
+        // window didn't take clicks). A dim layer swallows clicks outside it; Esc cancels, Return removes.
+        .overlay {
+            if let items = model.pendingCleanup {
+                ZStack {
+                    Color.black.opacity(0.18).contentShape(Rectangle()).onTapGesture {}
+                        .accessibilityHidden(true)
+                    CleanupConfirmSheet(items: items)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(Theme.paper).shadow(color: .black.opacity(0.25), radius: 10, y: 4))
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color(hex: LeafPalette.cardStroke), lineWidth: 0.8))
+                        .padding(.horizontal, PopoverLayout.padding)
+                }
+                .environment(\.colorScheme, .light)
+                .zIndex(ConfirmLayout.zIndex)
+                .onPreferenceChange(ConfirmButtonsKey.self) { f in
+                    model.hover.drawnConfirmButtons = f.isEmpty ? nil : f.map { ($0.name, $0.rect) }
+                }
+            }
         }
     }
 
@@ -435,13 +453,37 @@ struct CleanupBatch: Identifiable {
     var id: String { items.map(\.id).joined(separator: "|") }
 }
 
-/// Lists exactly what will be removed. Cancel is the default (Return/Escape); Remove has no shortcut.
+/// D27: a confirm button's drawn frame (popover/window coordinates), for `--confirm-check`.
+struct ConfirmButtonFrame: View {
+    let name: String
+    var body: some View {
+        GeometryReader { g in
+            let f = g.frame(in: .global)
+            Color.clear.preference(key: ConfirmButtonsKey.self, value: [NamedRect(name: name, rect: Rect(x: f.minX, y: f.minY, w: f.width, h: f.height))])
+        }
+    }
+}
+struct NamedRect: Equatable { let name: String; let rect: Rect }
+struct ConfirmButtonsKey: PreferenceKey {
+    static let defaultValue: [NamedRect] = []
+    static func reduce(value: inout [NamedRect], nextValue: () -> [NamedRect]) { value += nextValue() }
+}
+
+/// Lists exactly what will be removed. D27: Esc cancels, Return removes (both buttons clickable).
 struct CleanupConfirmSheet: View {
     @EnvironmentObject var model: AppModel
     let items: [CleanupItem]
 
+    /// D27b: every input (click or key) ends here; Remove is synchronous up to `confirmCleanup`.
+    private func perform(_ a: ConfirmAction) {
+        switch a {
+        case .cancel: model.pendingCleanup = nil
+        case .remove: model.confirmCleanup(items)
+        }
+    }
+
     var body: some View {
-        let total = items.reduce(Int64(0)) { $0 + ($1.kind == .remove ? $1.bytes : 0) }
+        let summary = ConfirmWording.summary(bytes: items.map(\.bytes), pruneOnly: items.map { $0.kind == .pruneOnly })
         VStack(alignment: .leading, spacing: 10) {
             Text(items.count == 1 ? "Remove this worktree?" : "Remove \(items.count) worktrees?")
                 .font(.system(size: 13, weight: .semibold))
@@ -457,7 +499,8 @@ struct CleanupConfirmSheet: View {
                                     .foregroundColor(Theme.ink2).help(i.path)
                             }
                             Spacer()
-                            Text(i.kind == .pruneOnly ? "prune only" : Format.bytes(i.bytes))
+                            // D27: a prune-only folder is already gone; no size (it frees nothing).
+                            Text(i.kind == .pruneOnly ? ConfirmWording.pruneTag : Format.bytes(i.bytes))
                                 .font(.system(size: 11)).monospacedDigit().foregroundColor(Theme.ink2)
                         }
                     }
@@ -466,15 +509,30 @@ struct CleanupConfirmSheet: View {
             .frame(maxHeight: 240)
             Divider()
             HStack {
-                Text("Frees about \(Format.bytes(total))").font(.system(size: 11.5, weight: .medium))
+                Text(summary).font(.system(size: 11.5, weight: .medium)).fixedSize(horizontal: false, vertical: true)
                 Spacer()
-                Button("Cancel", role: .cancel) { model.pendingCleanup = nil }
-                    .keyboardShortcut(.defaultAction)
-                Button(items.count == 1 ? "Remove" : "Remove \(items.count)", role: .destructive) { model.confirmCleanup(items) }
+                // D27b: plain buttons in the shared style that fire on click. No system bezel, no role and no
+                // keyboard shortcut on the visible buttons: the `.defaultAction` system button is what ignored
+                // clicks. Esc/Return are bound separately (hidden buttons below), all through `perform`.
+                Button { perform(.cancel) } label: { Text("Cancel").frame(width: ConfirmLayout.cancelWidth) }
+                    .buttonStyle(HoverButtonStyle(kind: .plain, height: ConfirmLayout.buttonHeight))
+                    .frame(width: ConfirmLayout.cancelWidth, height: ConfirmLayout.buttonHeight)
+                    .background(ConfirmButtonFrame(name: "Cancel"))
+                Button { perform(.remove) } label: { Text(items.count == 1 ? "Remove" : "Remove \(items.count)").frame(width: ConfirmLayout.removeWidth - 28) }
+                    .buttonStyle(HoverButtonStyle(kind: .dark))
+                    .frame(width: ConfirmLayout.removeWidth, height: ConfirmLayout.buttonHeight)
+                    .background(ConfirmButtonFrame(name: "Remove"))
             }
         }
-        .padding(16)
-        .frame(width: 420)
+        .padding(ConfirmLayout.padding)
+        .frame(width: ConfirmLayout.width)
+        .background {
+            // D27b: the keys, bound apart from the clickable buttons.
+            Button("") { perform(ConfirmInput.escape.action) }.keyboardShortcut(.cancelAction)
+                .opacity(0).allowsHitTesting(false).accessibilityHidden(true)
+            Button("") { perform(ConfirmInput.return.action) }.keyboardShortcut(.defaultAction)
+                .opacity(0).allowsHitTesting(false).accessibilityHidden(true)
+        }
     }
 }
 

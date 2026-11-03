@@ -51,12 +51,19 @@ final class HoverModel: ObservableObject {
 
     /// Pointer at `p` in the map view's own coordinates (top-left, y down). Mouse events and the sweep both
     /// come in here; the point goes through the same transform the drawing uses.
+    /// D27: true while a cleanup confirm is open: the map beneath ignores the pointer.
+    var blocked = false
+    /// D27: the confirm's Cancel/Remove frames and the footer frames, as drawn (popover coordinates).
+    var drawnConfirmButtons: [(name: String, rect: Rect)]?
+
     func pointer(view p: CGPoint, in map: LeafMap, at t: Double? = nil, animated: Bool = true) {
+        if blocked { return }
         let q = transform.toMap(Pt(p.x, p.y))
         move(to: CGPoint(x: q.x, y: q.y), in: map, at: t ?? Self.now(), animated: animated)
     }
 
     func click(view p: CGPoint, in map: LeafMap) {
+        if blocked { return }
         let q = transform.toMap(Pt(p.x, p.y))
         click(at: CGPoint(x: q.x, y: q.y), in: map)
     }

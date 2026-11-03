@@ -133,7 +133,11 @@ final class AppModel: ObservableObject {
     /// Worktrees "Clear N" would remove or prune: merged or upstream gone, and nothing uncommitted, unpushed or locked.
     var clearPlan: [CleanupItem] { cleanupDisabled ? [] : (scanned.map { Cleanup.plan($0, visible: visible) } ?? []) }
     /// Set to show the confirm sheet. Nothing runs until the sheet's Remove button is clicked.
-    @Published var pendingCleanup: [CleanupItem]?
+    @Published var pendingCleanup: [CleanupItem]? {
+        didSet { hover.blocked = pendingCleanup != nil; if pendingCleanup != nil { repoMenuOpen = false } }
+    }
+    /// D27 test hook (`--confirm-check`): records a confirmed batch instead of running it (cleanup disabled).
+    var confirmHook: (([CleanupItem]) -> Void)?
     /// What happened in the last run, shown until dismissed.
     @Published var cleanupResults: [CleanupOutcome]?
     @Published private(set) var cleaning = false
@@ -150,6 +154,7 @@ final class AppModel: ObservableObject {
     /// Called only by the confirm sheet. Each item is re-checked inside `Cleanup.execute` just before it runs.
     func confirmCleanup(_ items: [CleanupItem]) {
         pendingCleanup = nil
+        if let h = confirmHook { h(items); return }
         precondition(!cleanupDisabled, "cleanup is disabled in this mode")
         guard !cleaning, !items.isEmpty else { return }
         cleaning = true
