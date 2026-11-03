@@ -4,6 +4,53 @@ import ArboristCleanup
 import ArboristCore
 import SwiftUI
 
+/// D24: the one shared slot below the map, a fixed 448 × stripHeight. At rest it shows `content` (legend and
+/// storage bar); on hover or pin the leaf details crossfade in (0.2 s, none with Reduce Motion) in the same
+/// rect. Never empty, never resized. Its own view so pointer moves don't re-render the whole popover.
+struct SharedSlot<Content: View>: View {
+    @EnvironmentObject var hover: HoverModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let result: ScanResult?
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        let shown = result != nil && hover.visible.strip.flatMap { id in result.flatMap { WorktreeList.find($0, path: id) } } != nil
+        ZStack(alignment: .topLeading) {
+            VStack(alignment: .leading, spacing: 10) { content }
+                .padding(.top, StripLayout.padding)
+                .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.stripHeight, alignment: .topLeading)
+                .opacity(shown ? 0 : 1)
+                .allowsHitTesting(!shown)
+                .accessibilityHidden(shown)
+            if let r = result { DetailStrip(result: r) }
+        }
+        .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.stripHeight, alignment: .topLeading)
+        .animation(reduceMotion || hover.instant ? nil : .easeInOut(duration: PopoverLayout.stripFade), value: shown)
+        .reportFrame(SlotFrameKey.self)
+        .onPreferenceChange(SlotFrameKey.self) { hover.drawnSlotFrame = $0.first }
+    }
+}
+
+/// D24: the slot's and the footer buttons' frames as drawn (popover coordinates), for the sweep.
+struct SlotFrameKey: PreferenceKey {
+    static let defaultValue: [Rect] = []
+    static func reduce(value: inout [Rect], nextValue: () -> [Rect]) { value += nextValue() }
+}
+struct FooterFramesKey: PreferenceKey {
+    static let defaultValue: [Rect] = []
+    static func reduce(value: inout [Rect], nextValue: () -> [Rect]) { value += nextValue() }
+}
+
+extension View {
+    /// Reports this view's frame in the popover's coordinate space under `key`.
+    func reportFrame<K: PreferenceKey>(_ key: K.Type) -> some View where K.Value == [Rect] {
+        background(GeometryReader { g in
+            let f = g.frame(in: .named(PopoverCoords.name))
+            Color.clear.preference(key: key, value: [Rect(x: f.minX, y: f.minY, w: f.width, h: f.height)])
+        })
+    }
+}
+
 /// The whole app: a 480pt popover under the menu bar item. Worktree-first leaves (D9, D12).
 struct PopoverView: View {
     @EnvironmentObject var model: AppModel
@@ -23,71 +70,83 @@ struct PopoverView: View {
                 Text(statusText).font(.system(size: 11.5)).foregroundColor(Theme.ink2)
                     .accessibilityLabel(statusText)
             }
-            if let err = model.scanError {
-                HStack(spacing: 8) {
-                    Text(err + (model.result != nil ? " Showing the last results." : ""))
-                        .font(.system(size: 11)).foregroundColor(Theme.ink)
-                    Spacer()
-                    Button("Retry") { model.router.perform(.rescan) }.buttonStyle(HoverButtonStyle(kind: .link))
-                }
-                .padding(8)
-                .background(RoundedRectangle(cornerRadius: 6).fill(Color(hex: LeafPalette.fill(.stale)).opacity(0.35)))
-            }
-            if model.filterHidesEverything {
-                Text("No repos selected")
-                    .font(.system(size: 12)).foregroundColor(Theme.ink2)
-                    .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.mapHeight) // same box (D17, D18)
+            .frame(height: PopoverLayout.headerHeight)
+            // D24: the scan error sits over the map's top edge, so the popover's height never changes.
+            Group {
+                if model.filterHidesEverything {
+                    Text("No repos selected")
+                        .font(.system(size: 12)).foregroundColor(Theme.ink2)
+                        .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.mapHeight) // same box (D17, D18)
+                        .transition(.opacity)
+                } else if model.nothingMatches {
+                    VStack(spacing: 8) {
+                        Text("Nothing matches").font(.system(size: 12)).foregroundColor(Theme.ink2)
+                        Button("Show all") { withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) { model.setStates(.all) } }
+                            .buttonStyle(HoverButtonStyle(kind: .link))
+                    }
+                    .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.mapHeight) // same box (D17, D21)
                     .transition(.opacity)
-            } else if model.nothingMatches {
-                VStack(spacing: 8) {
-                    Text("Nothing matches").font(.system(size: 12)).foregroundColor(Theme.ink2)
-                    Button("Show all") { withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) { model.setStates(.all) } }
-                        .buttonStyle(HoverButtonStyle(kind: .link))
+                } else if let map = model.leafMap, let r = model.result {
+                    LeafMapView(map: map, result: r)
+                        .id(model.visible)          // a filter change cross-fades the re-laid-out map (D18)
+                        .transition(.opacity)
+                } else {
+                    Text(model.scanning ? "Looking for repositories and worktrees…" : (model.scanError == nil ? "No scan yet" : "No results"))
+                        .font(.system(size: 11)).foregroundColor(Theme.ink2)
+                        .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.mapHeight) // same layout in every state (D17)
                 }
-                .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.mapHeight) // same box (D17, D21)
-                .transition(.opacity)
-            } else if let map = model.leafMap, let r = model.result {
-                LeafMapView(map: map, result: r)
-                    .id(model.visible)          // a filter change cross-fades the re-laid-out map (D18)
-                    .transition(.opacity)
-            } else {
-                Text(model.scanning ? "Looking for repositories and worktrees…" : (model.scanError == nil ? "No scan yet" : "No results"))
-                    .font(.system(size: 11)).foregroundColor(Theme.ink2)
-                    .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.mapHeight) // same layout in every state (D17)
             }
-            // D22: the detail strip, docked below the map, the same fixed size in every state.
-            if let r = model.result, model.leafMap != nil, !model.filterHidesEverything, !model.nothingMatches {
-                DetailStrip(result: r)
-            } else {
-                Color.clear.frame(width: PopoverLayout.mapWidth, height: PopoverLayout.stripHeight)
+            .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.mapHeight)
+            .overlay(alignment: .top) {
+                if let err = model.scanError {
+                    HStack(spacing: 8) {
+                        Text(err + (model.result != nil ? " Showing the last results." : ""))
+                            .font(.system(size: 11)).foregroundColor(Theme.ink)
+                        Spacer()
+                        Button("Retry") { model.router.perform(.rescan) }.buttonStyle(HoverButtonStyle(kind: .link))
+                    }
+                    .padding(8)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color(hex: LeafPalette.fill(.stale)).opacity(0.35)))
+                }
             }
-            HStack { Key(); Spacer(minLength: 4); Text(model.result.flatMap { Format.cachesTotal($0.caches) } ?? "").font(.system(size: 11)).foregroundColor(Theme.ink2).lineLimit(1).layoutPriority(-1) }
-            FreeBar(free: model.freeBytes ?? 0, total: model.result?.volume?.totalBytes ?? 0)
+            // D24: one shared slot (legend + storage bar at rest, leaf details on hover or pin), then the
+            // footer buttons in their own row, so a pin never hides them. Fixed heights: the map never moves.
+            SharedSlot(result: model.leafMap != nil && !model.filterHidesEverything && !model.nothingMatches ? model.result : nil) {
+                HStack { Key(); Spacer(minLength: 4); Text(model.result.flatMap { Format.cachesTotal($0.caches) } ?? "").font(.system(size: 11)).foregroundColor(Theme.ink2).lineLimit(1).layoutPriority(-1) }
+                FreeBar(free: model.freeBytes ?? 0, total: model.result?.volume?.totalBytes ?? 0)
+            }
             HStack(spacing: 8) {
                 let n = model.clearPlan.count
                 Button(model.cleaning ? "Clearing…" : "Clear \(n)") { model.requestClear() }
                     .buttonStyle(HoverButtonStyle(kind: .dark))
                     .disabled(n == 0 || model.cleaning)
                     .help("Removes \(n) merged or upstream-gone worktrees with nothing uncommitted or unpushed. Asks first; branches are kept.")
+                    .reportFrame(FooterFramesKey.self)
                 // D22: Rescan, List, Settings and Quit go through the action router.
                 Button(model.scanning ? "Scanning…" : "Rescan") { model.router.perform(.rescan) }
                     .buttonStyle(HoverButtonStyle(kind: .link))
                     .disabled(!model.router.isEnabled(.rescan))
                     .help("Scan every folder again, ignoring the cache")
+                    .reportFrame(FooterFramesKey.self)
                 Button(model.showList ? "Hide list" : "List") { model.router.perform(.list) }
                     .buttonStyle(HoverButtonStyle(kind: .link))
+                    .reportFrame(FooterFramesKey.self)
                 Spacer()
                 Button { model.router.perform(.settings) } label: { Image(systemName: "gearshape").font(.system(size: 13)) }
                     .buttonStyle(HoverButtonStyle(kind: .icon))
                     .help("Settings")
                     .accessibilityLabel("Settings")
+                    .reportFrame(FooterFramesKey.self)
                 Button { model.router.perform(.quit) } label: { Image(systemName: "power").font(.system(size: 13)) }
                     .buttonStyle(HoverButtonStyle(kind: .icon))
                     .help("Quit Arborist")
                     .accessibilityLabel("Quit Arborist")
+                    .reportFrame(FooterFramesKey.self)
             }
             .font(.system(size: 11))
             .foregroundColor(Theme.ink2)
+            .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.footerRowHeight)
+            .onPreferenceChange(FooterFramesKey.self) { model.hover.drawnFooterButtons = $0.isEmpty ? nil : $0 }
             if model.showList, let r = model.result { Checklist(result: r).frame(maxHeight: 260) }
             if let results = model.cleanupResults { CleanupResultsView(results: results) }
         }
