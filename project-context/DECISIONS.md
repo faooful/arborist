@@ -87,3 +87,20 @@ D15 kept the last leaf hovered anywhere inside the map. The leaf shapes don't fi
 - **No transform from a collapsed frame.** `MapTransform.usable` returns nil below 64 pt on either side, or for a non-finite size. The view then draws nothing and keeps the last good transform.
 - **Tracking view.** The NSViewRepresentable reports the proposed size from `sizeThatFits` and has no intrinsic size.
 - **Check.** `ARBORIST_HOVER_SWEEP=1 … --snapshot PNG` (DEBUG only) renders the cached + scanning state at its fitting size, prints the popover size and map frame, and exits 3 if the map isn't 448×400.
+
+## D18: Repo filter in the header (2026-11-03)
+
+- **Control.** A compact "All repos ▾" button next to the count. It opens a small popover with All / None, a search field when there are more than 10 repos, and one checkbox row per repo with its worktree count. Option-click a row to show only that repo. The label reads "All repos", the repo's name, "N repos" or "No repos".
+- **Pure Core type.** `RepoFilter` stores the *excluded* repo paths. New repos show by default, and `pruned(to:)` quietly drops paths that left the scan (after a finished scan). It is persisted in UserDefaults under `arborist.excludedRepoPaths`; the sweep and snapshot hooks never write it.
+- **One filtered result.** AppModel keeps the raw `scanned` result and exposes `result = filter.apply(scanned)`. The map layout, headline count, stale count, Clear N, the List and the confirm sheet all read the filtered result. `Cleanup.plan(_:filter:)` applies the filter *before* building the plan, so a hidden repo's worktrees are never offered or removed.
+- **Motion and layout.** A filter change re-lays out the map and cross-fades it (0.22 s ease, no animation with Reduce Motion). The frame stays 448×400. A filter that hides every repo shows a calm "No repos selected" in the same box.
+- **Hooks.** `--filter name[,name]` (repo name or path, case-insensitive) on the app's `--snapshot` and `--hover-sweep`, and on CLI `render` including `--hover-sweep`.
+
+## D19: Hover card above the popover, never clipped (2026-11-03)
+
+**Bug (from D17).** The card was drawn inside the map's clipped 448×400 frame, so a card near the bottom lost its last rows (the Remove row first).
+- **Only the leaves are clipped.** LeafMapView now draws only the leaves and labels. `HoverCardOverlay` draws the card in an overlay on the popover root.
+- **Popover coordinates.** The root declares a `"popover"` named coordinate space. The map reports its origin in that space, the root reports its size, and with the MapTransform they make a Core `CardSpace`. The tracker converts the leaf's box and the pointer into popover coordinates.
+- **Placement.** `CardPlacement.place` (pure, Core) tries below the leaf, then right, then left, and flips above when there's no room. It keeps the current spot while it still fits and stays clear of the leaf. The result is always clamped inside the popover with an 8 pt margin.
+- **Size.** Placement uses the taller of `LeafSVG.cardSlot` (2 message lines plus the Remove row, 226 pt) and the card's measured height.
+- **Sweep.** Each frame has `cardRect` (popover coordinates) and `cardClipped`. The report has a top-level `cardClipped` count, expected 0 and asserted in the tests. The app sweep measures the space from AppKit's real layout; the CLI uses the SVG popover's geometry. The SVG draws the card in popover coordinates too.

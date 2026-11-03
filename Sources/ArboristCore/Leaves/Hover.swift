@@ -25,10 +25,12 @@ public struct HoverTracker: Equatable, Sendable {
     public private(set) var card: String?
     /// When a pending leave takes effect.
     public private(set) var clearAt: Double?
-    /// Card's top-left in map coordinates, while a card is shown.
+    /// Card's top-left while a card is shown: in popover coordinates when `space` is set (D19), else map coordinates.
     public private(set) var cardOrigin: Pt?
     /// Card size used for placement (set by the view; a sensible default otherwise).
     public var cardSize = LeafSVG.cardSlot
+    /// The popover the card is placed in (D19). Nil: the old in-map corner anchoring (map coordinates).
+    public var space: CardSpace?
     /// Card pinned by a click: hover is paused and the card's buttons are live.
     public private(set) var pinned = false
     /// The pointer is under the (unpinned) card. Only happens near the map's centre, which every corner
@@ -54,7 +56,7 @@ public struct HoverTracker: Equatable, Sendable {
             if clearAt == nil { clearAt = t + Self.leaveDelay }
             settle(at: t)
         }
-        cardUnderPointer = cardRect?.contains(p) ?? false
+        cardUnderPointer = cardRect?.contains(cardPoint(p)) ?? false
         return before != visible
     }
 
@@ -63,23 +65,30 @@ public struct HoverTracker: Equatable, Sendable {
     @discardableResult
     public mutating func click(at p: Pt, in map: LeafMap) -> Bool {
         let before = visible
-        if pinned, let r = cardRect, r.contains(p) { return false }
+        if pinned, let r = cardRect, r.contains(cardPoint(p)) { return false }
         if let leaf = map.hit(at: p) {
             if pinned && leaf.item.id == card { pinned = false } else { pinned = true; show(leaf, in: map, pointer: p) }
         } else {
             pinned = false
         }
-        cardUnderPointer = !pinned && (cardRect?.contains(p) ?? false)
+        cardUnderPointer = !pinned && (cardRect?.contains(cardPoint(p)) ?? false)
         return before != visible
     }
 
     /// Popover closed or Escape: drop the pin and the hover at once.
-    public mutating func reset() { self = HoverTracker(cardSize: cardSize) }
+    public mutating func reset() { self = HoverTracker(cardSize: cardSize, space: space) }
 
-    private init(cardSize: Pt) { self.cardSize = cardSize }
+    private init(cardSize: Pt, space: CardSpace?) { self.cardSize = cardSize; self.space = space }
+
+    /// A map point in the card's coordinate space.
+    func cardPoint(_ p: Pt) -> Pt { space?.toPopover(p) ?? p }
 
     private mutating func show(_ leaf: Leaf, in map: LeafMap, pointer: Pt) {
         hovered = leaf.item.id; card = leaf.item.id
+        if let s = space {
+            cardOrigin = CardPlacement.place(leaf: s.leafRect(leaf), size: cardSize, in: s.size, current: cardOrigin)
+            return
+        }
         let (x0, y0, x1, y1) = Geo.bbox(leaf.outline)
         cardOrigin = Self.anchor(current: cardOrigin, leaf: Rect(x: x0, y: y0, w: x1 - x0, h: y1 - y0),
                                  size: cardSize, in: Pt(map.width, map.height), pointer: pointer)
@@ -175,10 +184,16 @@ public enum HoverSweep {
         public var inGap: Bool
         /// In a gap: the leaf the nearest-edge rule picks (`LeafMap.hit`), else nil.
         public var snappedTo: String?
+        /// The card's rect in popover coordinates (D19), while shown.
+        public var cardRect: Rect?
+        /// The card is shown and not fully inside the popover (should never happen).
+        public var cardClipped: Bool
 
         public init(frame: Int, x: Double, y: Double, viewX: Double? = nil, viewY: Double? = nil, t: Double,
                     hovered: String?, cardShown: Bool, cardX: Double?, cardY: Double?,
-                    underPointer: String? = nil, inGap: Bool = false, snappedTo: String? = nil) {
+                    underPointer: String? = nil, inGap: Bool = false, snappedTo: String? = nil,
+                    cardRect: Rect? = nil, cardClipped: Bool = false) {
+            self.cardRect = cardRect; self.cardClipped = cardClipped
             self.frame = frame; self.x = x; self.y = y; self.viewX = viewX ?? x; self.viewY = viewY ?? y; self.t = t
             self.hovered = hovered; self.cardShown = cardShown; self.cardX = cardX; self.cardY = cardY
             self.underPointer = underPointer; self.inGap = inGap; self.snappedTo = snappedTo
@@ -191,7 +206,7 @@ public enum HoverSweep {
         public var isMismatch: Bool { expected != hovered }
 
         enum CodingKeys: String, CodingKey {
-            case frame, x, y, viewX, viewY, t, hovered, cardShown, cardX, cardY, underPointer, inGap, snappedTo, expected
+            case frame, x, y, viewX, viewY, t, hovered, cardShown, cardX, cardY, underPointer, inGap, snappedTo, expected, cardRect, cardClipped
         }
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -202,7 +217,9 @@ public enum HoverSweep {
                       cardX: try c.decodeIfPresent(Double.self, forKey: .cardX), cardY: try c.decodeIfPresent(Double.self, forKey: .cardY),
                       underPointer: try c.decodeIfPresent(String.self, forKey: .underPointer),
                       inGap: try c.decodeIfPresent(Bool.self, forKey: .inGap) ?? false,
-                      snappedTo: try c.decodeIfPresent(String.self, forKey: .snappedTo))
+                      snappedTo: try c.decodeIfPresent(String.self, forKey: .snappedTo),
+                      cardRect: try c.decodeIfPresent(Rect.self, forKey: .cardRect),
+                      cardClipped: try c.decodeIfPresent(Bool.self, forKey: .cardClipped) ?? false)
         }
 
         /// Writes `null` for missing values instead of leaving the key out.
@@ -214,6 +231,7 @@ public enum HoverSweep {
             try c.encode(cardX, forKey: .cardX); try c.encode(cardY, forKey: .cardY)
             try c.encode(underPointer, forKey: .underPointer); try c.encode(inGap, forKey: .inGap); try c.encode(snappedTo, forKey: .snappedTo)
             try c.encode(expected, forKey: .expected)
+            try c.encode(cardRect, forKey: .cardRect); try c.encode(cardClipped, forKey: .cardClipped)
         }
     }
 
@@ -227,6 +245,8 @@ public enum HoverSweep {
         /// Frames with the pointer in a gap between outlines.
         public var gapFrames: Int
         public var distinctHovered: Int
+        /// Frames whose card is not fully inside the popover (D19). Expected 0.
+        public var cardClipped: Int
 
         public init(_ frames: [Frame]) {
             self.frames = frames
@@ -235,11 +255,12 @@ public enum HoverSweep {
             mismatches = mismatchFrames.count
             gapFrames = frames.filter(\.inGap).count
             distinctHovered = Set(frames.compactMap(\.hovered)).count
+            cardClipped = frames.filter(\.cardClipped).count
         }
 
         public var summary: String {
             "\(frames.count) frames, \(hoveredCount) hovered, \(distinctHovered) distinct leaves, \(gapFrames) in gaps, "
-                + "\(mismatches) mismatches" + (mismatches > 0 ? " (frames \(mismatchFrames.map(String.init).joined(separator: ", ")))" : "")
+                + "\(mismatches) mismatches, \(cardClipped) clipped cards" + (mismatches > 0 ? " (frames \(mismatchFrames.map(String.init).joined(separator: ", ")))" : "")
         }
     }
 
@@ -257,9 +278,12 @@ public enum HoverSweep {
         let truth = p.map { _ in underPointer(v, in: map, transform) } ?? nil
         let onMap = p != nil && q.x >= 0 && q.y >= 0 && q.x <= map.width && q.y <= map.height
         let gap = onMap && truth == nil
+        let rect = tracker.card == nil ? nil : tracker.cardRect
+        let clipped = rect.map { tracker.space?.clips($0) ?? !$0.inside(width: map.width, height: map.height) } ?? false
         return Frame(frame: i, x: q.x, y: q.y, viewX: v.x, viewY: v.y, t: t, hovered: tracker.hovered,
                      cardShown: tracker.card != nil, cardX: tracker.cardOrigin?.x, cardY: tracker.cardOrigin?.y,
-                     underPointer: truth, inGap: gap, snappedTo: gap ? map.hit(at: q)?.item.id : nil)
+                     underPointer: truth, inGap: gap, snappedTo: gap ? map.hit(at: q)?.item.id : nil,
+                     cardRect: rect, cardClipped: clipped)
     }
 
     /// Serpentine across `rows` horizontal lines, then one point off the map and a settle after the grace.
@@ -280,10 +304,11 @@ public enum HoverSweep {
     /// Runs `path` through a tracker, the way the CLI does. Pointer events go in as view points through
     /// `transform`, like the app's mouse tracking. `apply` sees the tracker after each step.
     public static func run(_ map: LeafMap, path: [Pt?], step: Double = 1.0 / 30, cardSize: Pt = LeafSVG.cardSlot,
-                           transform: MapTransform = .identity,
+                           transform: MapTransform = .identity, space: CardSpace? = nil,
                            apply: (Int, HoverTracker) -> Void = { _, _ in }) -> [Frame] {
         var tracker = HoverTracker()
         tracker.cardSize = cardSize
+        tracker.space = space
         var frames: [Frame] = []
         var t = 0.0, last = Pt(-1, -1)
         for (i, p) in path.enumerated() {

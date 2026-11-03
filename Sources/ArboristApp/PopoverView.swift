@@ -16,6 +16,9 @@ struct PopoverView: View {
                 let parts = (model.result?.headline ?? "— worktrees").split(separator: " ", maxSplits: 2).map(String.init)
                 Text(parts.prefix(2).joined(separator: " ")).font(.system(size: 22, weight: .regular)).foregroundColor(Theme.ink)
                 if parts.count > 2 { Text(parts[2]).font(.system(size: 13)).foregroundColor(Theme.ink2) }
+                if let all = model.scanned?.repos, !all.isEmpty {
+                    RepoFilterButton(repos: all).padding(.leading, 6)
+                }
                 Spacer()
                 Text(statusText).font(.system(size: 11.5)).foregroundColor(Theme.ink2)
                     .accessibilityLabel(statusText)
@@ -30,8 +33,15 @@ struct PopoverView: View {
                 .padding(8)
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color(hex: LeafPalette.fill(.stale)).opacity(0.35)))
             }
-            if let map = model.leafMap, let r = model.result {
+            if model.filterHidesEverything {
+                Text("No repos selected")
+                    .font(.system(size: 12)).foregroundColor(Theme.ink2)
+                    .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.mapHeight) // same box (D17, D18)
+                    .transition(.opacity)
+            } else if let map = model.leafMap, let r = model.result {
                 LeafMapView(map: map, result: r)
+                    .id(model.filter)          // a filter change cross-fades the re-laid-out map (D18)
+                    .transition(.opacity)
             } else {
                 Text(model.scanning ? "Looking for repositories and worktrees…" : (model.scanError == nil ? "No scan yet" : "No results"))
                     .font(.system(size: 11)).foregroundColor(Theme.ink2)
@@ -64,6 +74,15 @@ struct PopoverView: View {
         .frame(width: PopoverLayout.width)
         .fixedSize(horizontal: false, vertical: true) // height = the content's ideal height, never squeezed
         .background(Theme.paper)
+        .coordinateSpace(name: PopoverSpace.name)
+        // D19: the card sits above everything, placed against the whole popover, so nothing clips it.
+        .overlay(alignment: .topLeading) {
+            if let r = model.result, !model.filterHidesEverything { HoverCardOverlay(result: r) }
+        }
+        .background(GeometryReader { g in
+            Color.clear.onAppear { model.hover.popoverSize = Pt(g.size.width, g.size.height) }
+                .onChange(of: g.size) { s in model.hover.popoverSize = Pt(s.width, s.height) }
+        })
         .sheet(item: Binding(get: { model.pendingCleanup.map(CleanupBatch.init) }, set: { if $0 == nil { model.pendingCleanup = nil } })) { batch in
             CleanupConfirmSheet(items: batch.items)
         }
@@ -282,4 +301,74 @@ extension StaleReason {
     }
 }
 
+/// Header "All repos" button (D18): a small popover with All/None, a search field past 10 repos,
+/// and one checkbox per repo with its worktree count. Option-click a repo to show only that one.
+struct RepoFilterButton: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let repos: [Repo]
+    @State private var open = false
+    @State private var query = ""
+
+    var body: some View {
+        Button { open.toggle() } label: {
+            HStack(spacing: 3) {
+                Text(model.filter.label(repos)).lineLimit(1).truncationMode(.middle)
+                Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
+            }
+            .font(.system(size: 11.5)).foregroundColor(Theme.ink2)
+            .frame(maxWidth: 140, alignment: .leading)
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("Repo filter: \(model.filter.label(repos))")
+        .popover(isPresented: $open, arrowEdge: .bottom) { menu }
+    }
+
+    private func set(_ f: RepoFilter) {
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) { model.setFilter(f) }
+    }
+
+    private var menu: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Button("All") { var f = model.filter; f.selectAll(); set(f) }
+                Button("None") { var f = model.filter; f.selectNone(repos); set(f) }
+                Spacer()
+                Text("⌥-click: only").font(.system(size: 10)).foregroundColor(Theme.ink2)
+            }
+            .buttonStyle(.borderless).font(.system(size: 11))
+            if repos.count > RepoFilter.searchThreshold {
+                TextField("Search repos", text: $query).textFieldStyle(.roundedBorder).font(.system(size: 11))
+            }
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(RepoFilter.matching(repos, query: query), id: \.path) { repo in
+                        Button {
+                            var f = model.filter
+                            if NSEvent.modifierFlags.contains(.option) { f.only(repo.path, among: repos) } else { f.toggle(repo.path) }
+                            set(f)
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: model.filter.includes(repo) ? "checkmark.square.fill" : "square")
+                                    .foregroundColor(model.filter.includes(repo) ? Theme.ink : Theme.ink2)
+                                Text(repo.name).lineLimit(1).truncationMode(.middle).foregroundColor(Theme.ink)
+                                Spacer()
+                                Text("\(repo.worktrees.count)").monospacedDigit().foregroundColor(Theme.ink2)
+                            }
+                            .font(.system(size: 11.5))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.borderless)
+                        .help(repo.path)
+                        .accessibilityLabel("\(repo.name), \(repo.worktrees.count) worktrees, \(model.filter.includes(repo) ? "shown" : "hidden")")
+                    }
+                }
+            }
+            .frame(maxHeight: 280)
+        }
+        .padding(10)
+        .frame(width: 240)
+    }
+}
 #endif

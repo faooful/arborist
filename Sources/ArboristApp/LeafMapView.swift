@@ -39,8 +39,13 @@ struct LeafMapView: View {
             }
         }
         .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.mapHeight)
-        .clipShape(Rectangle())
+        // Only the leaf drawing is clipped; the card is drawn by HoverCardOverlay above the popover (D19).
         .clipped()
+        .background(GeometryReader { g in
+            Color.clear
+                .onAppear { hover.mapOrigin = Pt(g.frame(in: .named(PopoverSpace.name)).minX, g.frame(in: .named(PopoverSpace.name)).minY) }
+                .onChange(of: g.frame(in: .named(PopoverSpace.name))) { f in hover.mapOrigin = Pt(f.minX, f.minY) }
+        })
         .onExitCommand { hover.reset() }
         .onDisappear { hover.reset() }
         .onAppear { hover.reduceMotion = reduceMotion; hover.setCardSize(LeafSVG.cardSlot) }
@@ -68,22 +73,44 @@ struct LeafMapView: View {
                     .fixedSize().position(x: g.at.x, y: g.at.y - 4)
                     .allowsHitTesting(false)
             }
+        }
+    }
+}
+
+/// The popover's named coordinate space (D19).
+enum PopoverSpace { static let name = "popover" }
+
+/// The hover card, drawn in an overlay on the popover root so the map's clip can't cut it (D19). Its origin
+/// is in popover coordinates (CardPlacement, against the whole popover).
+struct HoverCardOverlay: View {
+    @EnvironmentObject var hover: HoverModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let result: ScanResult
+
+    var body: some View {
+        let v = hover.visible
+        ZStack(alignment: .topLeading) {
             if let id = v.card, let o = v.cardOrigin, let ref = WorktreeList.find(result, path: id) {
                 ZStack(alignment: .topLeading) {
                     HoverCardView(card: HoverCard(ref), ref: ref)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .background(GeometryReader { g in
+                            Color.clear.onAppear { hover.measuredCard(g.size) }.onChange(of: g.size) { hover.measuredCard($0) }
+                        })
                         .id(id)
                         .transition(.opacity)
                 }
                 .animation(hover.instant ? nil : .easeInOut(duration: 0.12), value: id) // content cross-fade
                 .opacity(hover.cardOpacity)
                 .offset(x: o.x, y: o.y)
-                // Slides to a new corner; with Reduce Motion it jumps (opacity changes still fade).
+                // Slides to a new place; with Reduce Motion it jumps (opacity changes still fade).
                 .animation(reduceMotion || hover.instant ? nil : .easeInOut(duration: HoverTracker.duration(reduceMotion: false)), value: o)
                 // Unpinned, the card lets the pointer through to the leaves under it. Pinned, its buttons work.
                 .allowsHitTesting(v.pinned)
                 .transition(.opacity)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 

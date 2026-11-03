@@ -88,6 +88,12 @@ public enum Cleanup {
     }
 
     /// Everything "Clear N" would do, biggest first.
+    /// The plan for the repos the filter shows (D18): the filter is applied before the plan is built,
+    /// so "Clear N", its confirm sheet and the removals never include a hidden repo's worktrees.
+    public static func plan(_ result: ScanResult, filter: RepoFilter) -> [CleanupItem] {
+        plan(filter.apply(result))
+    }
+
     public static func plan(_ result: ScanResult) -> [CleanupItem] {
         result.repos.flatMap { r in r.worktrees.compactMap { item($0, repo: r) } }.sorted { $0.bytes > $1.bytes }
     }

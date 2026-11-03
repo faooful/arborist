@@ -47,5 +47,22 @@ final class AppSurfaceTests: XCTestCase {
         _ = Cleanup.plan(result).first.map { ($0.kind, $0.bytes, $0.branch, $0.repo, $0.path, $0.id) }
         _ = Cleanup.blocker(ref.worktree)?.reason
         _ = Cleanup.item(ref)
+        // D18: repo filter.
+        let rp = result.repos[0]
+        var f = RepoFilter.load(UserDefaults(suiteName: "arborist-surface")!)
+        f.toggle(rp.path); f.selectAll(); f.selectNone(result.repos); f.only(rp.path, among: result.repos)
+        f.save(UserDefaults(suiteName: "arborist-surface")!)
+        _ = (RepoFilter.all, RepoFilter.defaultsKey, RepoFilter.searchThreshold, f.excluded, f.includes(rp), f.includes(rp.path),
+             f.apply(result), f.label(result.repos), f.isEmpty(result.repos), f.isEverything(result.repos), f.selected(result.repos),
+             f.pruned(to: result.repos), RepoFilter.only(names: ["x"], among: result.repos), RepoFilter.matching(result.repos, query: "a"))
+        _ = Cleanup.plan(result, filter: f)
+        // D19: the card above the popover.
+        var sp = CardSpace(mapOrigin: Pt(16, 52), size: Pt(480, 560), transform: mt)
+        sp.mapOrigin = Pt(0, 0); sp.size = Pt(1, 1); sp.transform = .identity
+        _ = (sp.toPopover(Pt(1, 1)), sp.leafRect(leaf), sp.clips(Rect(x: 0, y: 0, w: 1, h: 1)), LeafSVG.cardSpace(map), LeafSVG.svgSize(map))
+        _ = (CardPlacement.place(leaf: Rect(x: 0, y: 0, w: 1, h: 1), size: LeafSVG.cardSlot, in: Pt(480, 560), current: nil),
+             CardPlacement.margin, CardPlacement.gap)
+        tracker.space = sp; _ = tracker.space
+        _ = (rep.cardClipped, HoverSweep.run(map, path: path, transform: mt, space: sp) { _, _ in }.first.map { ($0.cardRect, $0.cardClipped) })
     }
 }
