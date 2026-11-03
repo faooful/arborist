@@ -105,6 +105,28 @@ D15 kept the last leaf hovered anywhere inside the map. The leaf shapes don't fi
 - **Size.** Placement uses the taller of `LeafSVG.cardSlot` (2 message lines plus the Remove row, 226 pt) and the card's measured height.
 - **Sweep.** Each frame has `cardRect` (popover coordinates) and `cardClipped`. The report has a top-level `cardClipped` count, expected 0 and asserted in the tests. The app sweep measures the space from AppKit's real layout; the CLI uses the SVG popover's geometry. The SVG draws the card in popover coordinates too.
 
+## D20: The hover card can be reached (2026-11-03)
+
+Moving from a leaf to its card used to cross other leaves, which took the hover and moved or swapped the
+card before the pointer got there; unpinned, the card also let clicks through to the leaves under it.
+
+- **Card priority.** A pointer on the shown card keeps it (`HoverTracker.onCard`), whatever leaf is under it.
+  The card overlay always takes hits, so its buttons work pinned or not; a click on the card never pins or unpins.
+  The card has its own tracking area (converted to map coordinates), so the pointer on a part of the card
+  outside the map still counts. The map's exit is ignored while on the card; leaving the card (`exitCard`)
+  clears after `leaveDelay` unless the pointer lands back on the map or card.
+- **Corridor + grace.** The convex hull of the hovered leaf's rect and the card's rect is a corridor. Over
+  other leaves or gaps inside it, the card is held for `cardGrace` = 250 ms (from entering the corridor);
+  after that a move is ordinary. Leaving the map while held waits for the same grace.
+- **Dwell.** Moving onto another leaf (outside the corridor) switches after `switchDwell` = 120 ms on it; going
+  back first cancels. The app schedules the switch with the same cancellable timer as a clear (`nextDeadline`).
+- **Buttons at fixed offsets.** The card is the fixed slot height (226) with the footer pinned to the bottom,
+  so Core `HoverCardLayout` knows where Reveal in Finder and Remove sit.
+- **Sweep.** Frames gain `onCard`, `inCorridor`, `buttonUnderPointer`, `reachTarget`; `expected` is the card's
+  leaf while on the card or held. After the serpentine a reach-into-card path (7 frames, under the grace) goes
+  from the hovered leaf's centre to the first button; it must land on a button (`cardReachFailures` counts a
+  miss, a clipped card, or a card placed over the pointer). Instant mode jumps to the next clear or switch.
+
 ## D21: Legend items are state filters; "Ready to clean" (2026-11-03)
 
 - **Legend.** Clicking an item toggles that state and ⌥-click shows only that state. Active items look selected and inactive ones are dimmed. A small "Show all" appears when any state is off. To fit 448 pt, the labels are shortened to Uncommitted, Clean, Stale and Ready to clean; tooltips give the full names.
