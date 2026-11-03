@@ -90,10 +90,9 @@ case "render":
     if let dir = sweepDir {
         // Same HoverTracker path as the app's mouse tracking (D15): frame-NNN.svg plus frames.json.
         try! FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        let path = HoverSweep.path(in: map)
-        let frames = HoverSweep.run(map, path: path, space: LeafSVG.cardSpace(map)) { i, t, p in
-            let svg = LeafSVG.popover(r, map: map, note: "hover sweep · frame \(i)", hover: t.card,
-                                      now: sample ? LeafSample.now : Date(), cardAt: t.cardOrigin, pointer: p, cardOpacity: t.cardOpacity)
+        let frames = HoverSweep.run(map, space: LeafSVG.popoverSpace(map)) { i, t, p in
+            let svg = LeafSVG.popover(r, map: map, note: "hover sweep · frame \(i)", hover: t.hovered, pinned: t.pinned,
+                                      now: sample ? LeafSample.now : Date(), pointer: p, tooltipAt: t.tooltipOrigin)
             try! svg.write(toFile: dir + String(format: "/frame-%03d.svg", i), atomically: true, encoding: .utf8)
         }
         let report = HoverSweep.Report(frames)
