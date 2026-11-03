@@ -10,7 +10,7 @@ public enum Caches {
         ("Xcode DerivedData", ["Library/Developer/Xcode/DerivedData"]),
     ]
 
-    public static func scan(home: String, skipped: inout Int) -> [CacheEntry] {
+    public static func scan(home: String, skipped: inout Int, cancel: CancelFlag? = nil) -> [CacheEntry] {
         var out: [CacheEntry] = []
         let fm = FileManager.default
         for (name, rels) in candidates {
@@ -20,7 +20,7 @@ public enum Caches {
                 let p = home + "/" + rel
                 var isDir: ObjCBool = false
                 guard fm.fileExists(atPath: p, isDirectory: &isDir), isDir.boolValue else { continue }
-                total += DiskUsage.treeSize(URL(fileURLWithPath: p), skipped: &skipped)
+                total += DiskUsage.treeSize(URL(fileURLWithPath: p), skipped: &skipped, cancel: cancel)
                 paths.append(p)
             }
             if !paths.isEmpty { out.append(CacheEntry(name: name, path: paths.first, bytes: total)) }
