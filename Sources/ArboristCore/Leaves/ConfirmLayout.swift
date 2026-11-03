@@ -80,3 +80,19 @@ public enum ConfirmWording {
         return n == 0 ? s : s + " · \(n) already deleted"
     }
 }
+
+/// D27b: what the confirm does for each input. Each visible button is a plain click target with its own
+/// action; the keys are bound separately and map to the same actions. A button's click must never depend
+/// on a keyboard shortcut (the `.defaultAction` system Remove button took Return but not clicks).
+public enum ConfirmAction: String, Sendable { case cancel, remove }
+public enum ConfirmInput: String, CaseIterable, Sendable {
+    case clickCancel, clickRemove, escape, `return`
+    public var action: ConfirmAction {
+        switch self {
+        case .clickCancel, .escape: return .cancel
+        case .clickRemove, .return: return .remove
+        }
+    }
+    /// The visible buttons carry no keyboard shortcut (keys live on hidden buttons).
+    public static let visibleButtonShortcuts: [String: String?] = ["Cancel": nil, "Remove": nil]
+}

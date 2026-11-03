@@ -208,14 +208,26 @@ enum HoverSweepRunner {
             let x = r.x + r.w / 2, y = r.y + r.h / 2
             return NSPoint(x: x, y: host.isFlipped ? host.bounds.height - y : y) // window coordinates are y-up
         }
+        // D27b: a click as AppKit delivers it: the mouseUp is queued before the mouseDown is dispatched, so a
+        // control that tracks the mouse in its own loop (NSCell-style) sees it, as with a real click. Then the
+        // run loop drains so any async action lands before the check (polled, max 0.5 s).
         func click(_ r: Rect) {
-            for t in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-                if let e = NSEvent.mouseEvent(with: t, location: point(r), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                                              windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) {
-                    window.sendEvent(e)
-                }
-                settle(host)
+            func ev(_ t: NSEvent.EventType) -> NSEvent? {
+                NSEvent.mouseEvent(with: t, location: point(r), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                   windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
             }
+            guard let down = ev(.leftMouseDown), let up = ev(.leftMouseUp) else { fail("no mouse event") }
+            NSApp.postEvent(up, atStart: false)
+            window.sendEvent(down)
+            settle(host)
+            // If nothing consumed the queued mouseUp, deliver it now.
+            while let e = NSApp.nextEvent(matching: [.leftMouseUp], until: Date(), inMode: .default, dequeue: true) { window.sendEvent(e) }
+            settle(host)
+        }
+        func waitFor(_ ok: () -> Bool) -> Bool {
+            let end = Date().addingTimeInterval(0.5)
+            while !ok() && Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+            return ok()
         }
         func key(_ code: UInt16, _ chars: String) {
             for t in [NSEvent.EventType.keyDown, .keyUp] {
@@ -234,6 +246,12 @@ enum HoverSweepRunner {
         }
 
         for (name, items) in cases {
+            // D27b: Remove as the very first click on a fresh confirm too (not only after Cancel).
+            if let remove = open(items).first(where: { $0.name == "Remove" }) {
+                click(remove.rect)
+                check(waitFor { model.pendingCleanup == nil && confirmed.last == items }, "\(name): first click on Remove confirms")
+                confirmed.removeAll()
+            }
             let buttons = open(items)
             check(buttons.count == 2, "\(name): Cancel and Remove drawn \(buttons.map { "\($0.name) \($0.rect)" })")
             let layers = HitOrder.popover(size: Pt(host.bounds.width, host.bounds.height), map: map, footer: footer, confirm: buttons)
@@ -254,7 +272,7 @@ enum HoverSweepRunner {
             let buttons2 = open(items)
             if let remove = buttons2.first(where: { $0.name == "Remove" }) {
                 click(remove.rect)
-                check(model.pendingCleanup == nil && confirmed.last == items, "\(name): Remove click confirms \(items.count)")
+                check(waitFor { model.pendingCleanup == nil && confirmed.last == items }, "\(name): Remove click confirms \(items.count)")
             }
             confirmed.removeAll()
             _ = open(items); key(53, "\u{1b}")

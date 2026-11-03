@@ -41,3 +41,17 @@ final class ConfirmHitTests: XCTestCase, @unchecked Sendable {
         XCTAssertTrue(mixed.hasSuffix("· 1 already deleted"), mixed)
     }
 }
+
+/// D27b: Remove fires on its own click; the shortcut that broke it is off the visible button.
+final class ConfirmInputTests: XCTestCase, @unchecked Sendable {
+    func testEveryInputHasItsAction() {
+        XCTAssertEqual(ConfirmInput.clickRemove.action, .remove)
+        XCTAssertEqual(ConfirmInput.return.action, .remove)
+        XCTAssertEqual(ConfirmInput.clickCancel.action, .cancel)
+        XCTAssertEqual(ConfirmInput.escape.action, .cancel)
+    }
+    func testVisibleButtonsCarryNoShortcut() {
+        XCTAssertEqual(ConfirmInput.visibleButtonShortcuts.count, 2)
+        XCTAssertTrue(ConfirmInput.visibleButtonShortcuts.values.allSatisfy { $0 == nil })
+    }
+}

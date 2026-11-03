@@ -474,6 +474,14 @@ struct CleanupConfirmSheet: View {
     @EnvironmentObject var model: AppModel
     let items: [CleanupItem]
 
+    /// D27b: every input (click or key) ends here; Remove is synchronous up to `confirmCleanup`.
+    private func perform(_ a: ConfirmAction) {
+        switch a {
+        case .cancel: model.pendingCleanup = nil
+        case .remove: model.confirmCleanup(items)
+        }
+    }
+
     var body: some View {
         let summary = ConfirmWording.summary(bytes: items.map(\.bytes), pruneOnly: items.map { $0.kind == .pruneOnly })
         VStack(alignment: .leading, spacing: 10) {
@@ -503,18 +511,28 @@ struct CleanupConfirmSheet: View {
             HStack {
                 Text(summary).font(.system(size: 11.5, weight: .medium)).fixedSize(horizontal: false, vertical: true)
                 Spacer()
-                Button("Cancel", role: .cancel) { model.pendingCleanup = nil }
-                    .keyboardShortcut(.cancelAction)
+                // D27b: plain buttons in the shared style that fire on click. No system bezel, no role and no
+                // keyboard shortcut on the visible buttons: the `.defaultAction` system button is what ignored
+                // clicks. Esc/Return are bound separately (hidden buttons below), all through `perform`.
+                Button { perform(.cancel) } label: { Text("Cancel").frame(width: ConfirmLayout.cancelWidth) }
+                    .buttonStyle(HoverButtonStyle(kind: .plain, height: ConfirmLayout.buttonHeight))
                     .frame(width: ConfirmLayout.cancelWidth, height: ConfirmLayout.buttonHeight)
                     .background(ConfirmButtonFrame(name: "Cancel"))
-                Button(items.count == 1 ? "Remove" : "Remove \(items.count)", role: .destructive) { model.confirmCleanup(items) }
-                    .keyboardShortcut(.defaultAction)
+                Button { perform(.remove) } label: { Text(items.count == 1 ? "Remove" : "Remove \(items.count)").frame(width: ConfirmLayout.removeWidth - 28) }
+                    .buttonStyle(HoverButtonStyle(kind: .dark))
                     .frame(width: ConfirmLayout.removeWidth, height: ConfirmLayout.buttonHeight)
                     .background(ConfirmButtonFrame(name: "Remove"))
             }
         }
         .padding(ConfirmLayout.padding)
         .frame(width: ConfirmLayout.width)
+        .background {
+            // D27b: the keys, bound apart from the clickable buttons.
+            Button("") { perform(ConfirmInput.escape.action) }.keyboardShortcut(.cancelAction)
+                .opacity(0).allowsHitTesting(false).accessibilityHidden(true)
+            Button("") { perform(ConfirmInput.return.action) }.keyboardShortcut(.defaultAction)
+                .opacity(0).allowsHitTesting(false).accessibilityHidden(true)
+        }
     }
 }
 
