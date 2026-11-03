@@ -1,5 +1,5 @@
 import XCTest
-@testable import DevspaceCore
+@testable import ArboristCore
 
 final class GitParsingTests: XCTestCase {
     func testParsesPorcelainWorktreeList() {
@@ -66,7 +66,7 @@ final class ClassificationTests: XCTestCase {
 
     func testMeasureSplitsRebuildableAndSkipsNestedRepos() throws {
         let fm = FileManager.default
-        let root = fm.temporaryDirectory.appendingPathComponent("devspace-test-\(UUID().uuidString)")
+        let root = fm.temporaryDirectory.appendingPathComponent("arborist-test-\(UUID().uuidString)")
         defer { try? fm.removeItem(at: root) }
         func write(_ rel: String, _ bytes: Int) throws {
             let u = root.appendingPathComponent(rel)
@@ -115,7 +115,7 @@ final class ScannerIntegrationTests: XCTestCase {
     func testScanFindsWorktreesAndStaleness() throws {
         guard Shell.run(["git", "--version"]) != nil else { throw XCTSkip("git not installed") }
         let fm = FileManager.default
-        let base = fm.temporaryDirectory.appendingPathComponent("devspace-int-\(UUID().uuidString)").path
+        let base = fm.temporaryDirectory.appendingPathComponent("arborist-int-\(UUID().uuidString)").path
         defer { try? fm.removeItem(atPath: base) }
         let repo = base + "/proj"
         try fm.createDirectory(atPath: repo, withIntermediateDirectories: true)
@@ -132,7 +132,7 @@ final class ScannerIntegrationTests: XCTestCase {
         g(base + "/wt-wip", "add", "."); g(base + "/wt-wip", "commit", "-qm", "three")
         try "dirty".write(toFile: base + "/wt-wip/d.txt", atomically: true, encoding: .utf8)
 
-        let r = Scanner(config: DevspaceConfig(roots: [base], lowSpaceThresholdGB: 1, maxDepth: 3)).scan()
+        let r = Scanner(config: ArboristConfig(roots: [base], lowSpaceThresholdGB: 1, maxDepth: 3)).scan()
         XCTAssertEqual(r.repos.count, 1, "worktrees must be grouped under one repo")
         let wts = r.repos[0].worktrees
         XCTAssertEqual(wts.count, 3)

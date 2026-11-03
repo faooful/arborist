@@ -1,23 +1,23 @@
-import DevspaceCore
+import ArboristCore
 import Foundation
 
 let usage = """
-devspace — read-only disk usage for dev repos, git worktrees and caches
+arborist — read-only disk usage for dev repos, git worktrees and caches
 
 USAGE:
-  devspace scan [--json] [--root PATH ...] [--max-depth N]
-  devspace free [--json]
-  devspace config            print the config file path and contents
+  arborist scan [--json] [--root PATH ...] [--max-depth N]
+  arborist free [--json]
+  arborist config            print the config file path and contents
 
-Without --root, roots come from ~/.config/devspace/config.json (default: ~ and ~/Documents).
-devspace never deletes anything.
+Without --root, roots come from ~/.config/arborist/config.json (default: ~ and ~/Documents).
+arborist never deletes anything.
 """
 
 var args = Array(CommandLine.arguments.dropFirst())
 var command = "scan"
 if let first = args.first, !first.hasPrefix("-") || first == "-h" || first == "--help" { command = first; args.removeFirst() }
 let json = args.contains("--json")
-var config = DevspaceConfig.load()
+var config = ArboristConfig.load()
 var roots: [String] = []
 var i = 0
 while i < args.count {
@@ -37,13 +37,13 @@ case "scan":
     let r = Scanner(config: config).scan()
     if json { FileHandle.standardOutput.write(try! r.jsonData()); print() } else { print(Format.humanReport(r)) }
 case "free":
-    guard let v = DiskUsage.volume(for: DevspaceConfig.home) else { exit(1) }
+    guard let v = DiskUsage.volume(for: ArboristConfig.home) else { exit(1) }
     if json {
         let e = JSONEncoder(); e.outputFormatting = [.prettyPrinted, .sortedKeys]
         FileHandle.standardOutput.write(try! e.encode(v)); print()
     } else { print("\(Format.bytes(v.freeBytes)) free of \(Format.bytes(v.totalBytes))") }
 case "config":
-    print(DevspaceConfig.fileURL.path)
+    print(ArboristConfig.fileURL.path)
     let e = JSONEncoder(); e.outputFormatting = [.prettyPrinted, .sortedKeys]
     print(String(decoding: try! e.encode(config), as: UTF8.self))
 case "-h", "--help", "help": print(usage)

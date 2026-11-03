@@ -1,6 +1,6 @@
 #if os(macOS)
 import AppKit
-import DevspaceCore
+import ArboristCore
 import SwiftUI
 import UserNotifications
 
@@ -9,7 +9,7 @@ final class AppModel: ObservableObject {
     @Published var result: ScanResult?
     @Published var scanning = false
     @Published var freeBytes: Int64?
-    @Published var config = DevspaceConfig.load()
+    @Published var config = ArboristConfig.load()
     @Published var selection: String?   // path of the selected repo/worktree/cache
     private var timer: Timer?
     private var notifiedLow = false
@@ -40,7 +40,7 @@ final class AppModel: ObservableObject {
     }
 
     func refreshFree() {
-        freeBytes = DiskUsage.volume(for: DevspaceConfig.home)?.freeBytes
+        freeBytes = DiskUsage.volume(for: ArboristConfig.home)?.freeBytes
         checkLowSpace()
     }
 
@@ -64,7 +64,7 @@ final class AppModel: ObservableObject {
             let c = UNMutableNotificationContent()
             c.title = "Low disk space"
             c.body = "\(Format.bytes(free)) free, below your \(Int(self.config.lowSpaceThresholdGB)) GB threshold."
-            center.add(UNNotificationRequest(identifier: "devspace.lowspace", content: c, trigger: nil))
+            center.add(UNNotificationRequest(identifier: "arborist.lowspace", content: c, trigger: nil))
         }
     }
 

@@ -1,24 +1,24 @@
 import Foundation
 
-/// Shared by the CLI and the app: ~/.config/devspace/config.json
-public struct DevspaceConfig: Codable, Equatable, Sendable {
+/// Shared by the CLI and the app: ~/.config/arborist/config.json
+public struct ArboristConfig: Codable, Equatable, Sendable {
     public var roots: [String]
     public var lowSpaceThresholdGB: Double
     public var maxDepth: Int
 
     public static var home: String { FileManager.default.homeDirectoryForCurrentUser.path }
-    public static var defaults: DevspaceConfig {
-        DevspaceConfig(roots: ["~", "~/Documents"], lowSpaceThresholdGB: 20, maxDepth: 4)
+    public static var defaults: ArboristConfig {
+        ArboristConfig(roots: ["~", "~/Documents"], lowSpaceThresholdGB: 20, maxDepth: 4)
     }
     public init(roots: [String], lowSpaceThresholdGB: Double, maxDepth: Int) {
         self.roots = roots; self.lowSpaceThresholdGB = lowSpaceThresholdGB; self.maxDepth = maxDepth
     }
 
     public static var fileURL: URL {
-        URL(fileURLWithPath: home).appendingPathComponent(".config/devspace/config.json")
+        URL(fileURLWithPath: home).appendingPathComponent(".config/arborist/config.json")
     }
-    public static func load() -> DevspaceConfig {
-        guard let d = try? Data(contentsOf: fileURL), let c = try? JSONDecoder().decode(DevspaceConfig.self, from: d) else { return defaults }
+    public static func load() -> ArboristConfig {
+        guard let d = try? Data(contentsOf: fileURL), let c = try? JSONDecoder().decode(ArboristConfig.self, from: d) else { return defaults }
         return c
     }
     public func save() throws {

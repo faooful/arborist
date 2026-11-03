@@ -2,18 +2,18 @@
 import PackageDescription
 
 let package = Package(
-    name: "devspace",
+    name: "arborist",
     platforms: [.macOS(.v13)],
     products: [
-        .library(name: "DevspaceCore", targets: ["DevspaceCore"]),
-        .executable(name: "devspace", targets: ["devspace"]),
-        .executable(name: "DevspaceApp", targets: ["DevspaceApp"]),
+        .library(name: "ArboristCore", targets: ["ArboristCore"]),
+        .executable(name: "arborist", targets: ["arborist"]),
+        .executable(name: "ArboristApp", targets: ["ArboristApp"]),
     ],
     targets: [
-        .target(name: "DevspaceCore"),
-        .executableTarget(name: "devspace", dependencies: ["DevspaceCore"]),
+        .target(name: "ArboristCore"),
+        .executableTarget(name: "arborist", dependencies: ["ArboristCore"]),
         // The app's SwiftUI code is wrapped in `#if os(macOS)`; on Linux it builds a stub.
-        .executableTarget(name: "DevspaceApp", dependencies: ["DevspaceCore"]),
-        .testTarget(name: "DevspaceCoreTests", dependencies: ["DevspaceCore"]),
+        .executableTarget(name: "ArboristApp", dependencies: ["ArboristCore"]),
+        .testTarget(name: "ArboristCoreTests", dependencies: ["ArboristCore"]),
     ]
 )

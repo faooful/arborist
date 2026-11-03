@@ -1,6 +1,6 @@
 #if os(macOS)
 import AppKit
-import DevspaceCore
+import ArboristCore
 import SwiftUI
 
 /// The whole app: a small popover under the menu bar item. Plain styling until the popover redesign lands.
@@ -20,7 +20,7 @@ struct PopoverView: View {
             Divider()
             HStack(spacing: 8) {
                 Button(model.scanning ? "Scanning…" : "Rescan") { model.rescan() }.disabled(model.scanning)
-                Button("Reveal in Finder") { model.reveal(model.selection ?? DevspaceConfig.home) }
+                Button("Reveal in Finder") { model.reveal(model.selection ?? ArboristConfig.home) }
                 Spacer()
                 Button("Settings…") {
                     NSApp.activate(ignoringOtherApps: true)

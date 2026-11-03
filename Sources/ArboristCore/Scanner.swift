@@ -2,8 +2,8 @@ import Foundation
 
 /// Read-only scanner. Never deletes, moves, or writes anything inside scanned folders.
 public final class Scanner {
-    public let config: DevspaceConfig
-    public init(config: DevspaceConfig = .load()) { self.config = config }
+    public let config: ArboristConfig
+    public init(config: ArboristConfig = .load()) { self.config = config }
 
     /// Folders under the home folder that we never walk into unless they are a chosen root:
     /// they are huge, rarely hold repos, or trigger macOS privacy prompts.
@@ -54,15 +54,15 @@ public final class Scanner {
         }
         repos.sort { $0.size.total > $1.size.total }
 
-        let caches = Caches.scan(home: DevspaceConfig.home, skipped: &skipped)
-        return ScanResult(scannedAt: Date(), roots: roots, volume: DiskUsage.volume(for: DevspaceConfig.home),
+        let caches = Caches.scan(home: ArboristConfig.home, skipped: &skipped)
+        return ScanResult(scannedAt: Date(), roots: roots, volume: DiskUsage.volume(for: ArboristConfig.home),
                           repos: repos, caches: caches, skippedPaths: skipped)
     }
 
     /// Walks roots to `maxDepth`, returning folders containing `.git` (a dir for repos, a file for linked worktrees).
     func discoverRepos(roots: [String], skipped: inout Int) -> [String] {
         let fm = FileManager.default
-        let home = DevspaceConfig.home
+        let home = ArboristConfig.home
         let rootSet = Set(roots)
         var found: [String] = []
         var visited = Set<String>()
