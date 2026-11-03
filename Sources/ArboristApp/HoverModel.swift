@@ -10,6 +10,8 @@ final class HoverModel: ObservableObject {
     @Published private(set) var visible = HoverTracker().visible
     private(set) var tracker = HoverTracker()
     var reduceMotion = false
+    /// Sweep hook: every change applies with no animation, so a captured frame is the settled state.
+    var instant = false
     /// One pending leave timer at a time; a newer event cancels it. A main-actor Task, so the timer
     /// never touches this model off the main actor.
     private var settleWork: Task<Void, Never>?
@@ -88,7 +90,7 @@ final class HoverModel: ObservableObject {
     private func publish(_ animated: Bool) {
         let next = tracker.visible
         guard next != visible else { return }
-        if animated {
+        if animated && !instant {
             withAnimation(.easeInOut(duration: HoverTracker.duration(reduceMotion: reduceMotion))) { visible = next }
         } else {
             var t = Transaction(); t.disablesAnimations = true

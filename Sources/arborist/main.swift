@@ -78,8 +78,10 @@ case "render":
                                       now: sample ? LeafSample.now : Date(), cardAt: t.cardOrigin, pointer: path[i], cardOpacity: t.cardOpacity)
             try! svg.write(toFile: dir + String(format: "/frame-%03d.svg", i), atomically: true, encoding: .utf8)
         }
-        try! HoverSweep.json(frames).write(to: URL(fileURLWithPath: dir + "/frames.json"))
-        print("\(frames.count) frames in \(dir)")
+        let report = HoverSweep.Report(frames)
+        try! HoverSweep.json(report).write(to: URL(fileURLWithPath: dir + "/frames.json"))
+        print(report.summary)
+        print("frames in \(dir)")
         exit(0)
     }
     write(svg, to: outPath)

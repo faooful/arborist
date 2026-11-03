@@ -149,27 +149,93 @@ public struct HoverTracker: Equatable, Sendable {
 public enum HoverSweep {
     public struct Frame: Codable, Equatable, Sendable {
         public var frame: Int
+        /// Pointer in layout (map) coordinates.
         public var x: Double
         public var y: Double
+        /// The same pointer in the map view's coordinates (through the MapTransform).
+        public var viewX: Double
+        public var viewY: Double
         public var t: Double
         public var hovered: String?
         public var cardShown: Bool
         public var cardX: Double?
         public var cardY: Double?
+        /// Ground truth, independent of HoverTracker: the leaf whose drawn outline (in view coordinates)
+        /// contains the pointer, by plain point-in-polygon. Nil in a gap or off the map.
+        public var underPointer: String?
+        /// True when the pointer is on the map but inside no outline.
+        public var inGap: Bool
+        /// In a gap: the leaf the nearest-edge rule picks (`LeafMap.hit`), else nil.
+        public var snappedTo: String?
 
-        public init(frame: Int, x: Double, y: Double, t: Double, hovered: String?, cardShown: Bool, cardX: Double?, cardY: Double?) {
-            self.frame = frame; self.x = x; self.y = y; self.t = t
+        public init(frame: Int, x: Double, y: Double, viewX: Double? = nil, viewY: Double? = nil, t: Double,
+                    hovered: String?, cardShown: Bool, cardX: Double?, cardY: Double?,
+                    underPointer: String? = nil, inGap: Bool = false, snappedTo: String? = nil) {
+            self.frame = frame; self.x = x; self.y = y; self.viewX = viewX ?? x; self.viewY = viewY ?? y; self.t = t
             self.hovered = hovered; self.cardShown = cardShown; self.cardX = cardX; self.cardY = cardY
+            self.underPointer = underPointer; self.inGap = inGap; self.snappedTo = snappedTo
         }
 
-        enum CodingKeys: String, CodingKey { case frame, x, y, t, hovered, cardShown, cardX, cardY }
-        /// Writes `null` for a missing hovered id or card position instead of leaving the key out.
+        /// A frame whose ground truth names a leaf other than the hovered one.
+        public var isMismatch: Bool { underPointer != nil && underPointer != hovered }
+
+        enum CodingKeys: String, CodingKey {
+            case frame, x, y, viewX, viewY, t, hovered, cardShown, cardX, cardY, underPointer, inGap, snappedTo
+        }
+        /// Writes `null` for missing values instead of leaving the key out.
         public func encode(to encoder: Encoder) throws {
             var c = encoder.container(keyedBy: CodingKeys.self)
             try c.encode(frame, forKey: .frame); try c.encode(x, forKey: .x); try c.encode(y, forKey: .y)
+            try c.encode(viewX, forKey: .viewX); try c.encode(viewY, forKey: .viewY)
             try c.encode(t, forKey: .t); try c.encode(hovered, forKey: .hovered); try c.encode(cardShown, forKey: .cardShown)
             try c.encode(cardX, forKey: .cardX); try c.encode(cardY, forKey: .cardY)
+            try c.encode(underPointer, forKey: .underPointer); try c.encode(inGap, forKey: .inGap); try c.encode(snappedTo, forKey: .snappedTo)
         }
+    }
+
+    /// frames.json: the frames plus a summary.
+    public struct Report: Codable, Equatable, Sendable {
+        public var frames: [Frame]
+        public var hoveredCount: Int
+        /// Frames where `underPointer` is non-null and differs from `hovered`.
+        public var mismatches: Int
+        public var mismatchFrames: [Int]
+        /// Frames with the pointer in a gap between outlines.
+        public var gapFrames: Int
+        public var distinctHovered: Int
+
+        public init(_ frames: [Frame]) {
+            self.frames = frames
+            hoveredCount = frames.filter { $0.hovered != nil }.count
+            mismatchFrames = frames.filter(\.isMismatch).map(\.frame)
+            mismatches = mismatchFrames.count
+            gapFrames = frames.filter(\.inGap).count
+            distinctHovered = Set(frames.compactMap(\.hovered)).count
+        }
+
+        public var summary: String {
+            "\(frames.count) frames, \(hoveredCount) hovered, \(distinctHovered) distinct leaves, \(gapFrames) in gaps, "
+                + "\(mismatches) mismatches" + (mismatches > 0 ? " (frames \(mismatchFrames.map(String.init).joined(separator: ", ")))" : "")
+        }
+    }
+
+    /// Ground truth for a pointer at view point `v`: plain point-in-polygon against every leaf's outline
+    /// mapped into view coordinates. Deliberately doesn't use HoverTracker, `LeafMap.hit` or `toMap`.
+    public static func underPointer(_ v: Pt, in map: LeafMap, _ transform: MapTransform) -> String? {
+        map.leaves.first { Geo.inside($0.outline.map(transform.toView), v) }?.item.id
+    }
+
+    /// Builds one frame from the tracker state after the pointer moved to `p` (map coordinates, nil = left).
+    public static func frame(_ i: Int, pointer p: Pt?, last: Pt, t: Double, tracker: HoverTracker,
+                             map: LeafMap, transform: MapTransform = .identity) -> Frame {
+        let q = p ?? last
+        let v = transform.toView(q)
+        let truth = p.map { _ in underPointer(v, in: map, transform) } ?? nil
+        let onMap = p != nil && q.x >= 0 && q.y >= 0 && q.x <= map.width && q.y <= map.height
+        let gap = onMap && truth == nil
+        return Frame(frame: i, x: q.x, y: q.y, viewX: v.x, viewY: v.y, t: t, hovered: tracker.hovered,
+                     cardShown: tracker.card != nil, cardX: tracker.cardOrigin?.x, cardY: tracker.cardOrigin?.y,
+                     underPointer: truth, inGap: gap, snappedTo: gap ? map.hit(at: q)?.item.id : nil)
     }
 
     /// Serpentine across `rows` horizontal lines, then one point off the map and a settle after the grace.
@@ -187,26 +253,30 @@ public enum HoverSweep {
         return pts
     }
 
-    /// Runs `path` through a tracker. `step` is seconds between points. `apply` sees the tracker after each step
-    /// (the app renders a frame there).
+    /// Runs `path` through a tracker, the way the CLI does. Pointer events go in as view points through
+    /// `transform`, like the app's mouse tracking. `apply` sees the tracker after each step.
     public static func run(_ map: LeafMap, path: [Pt?], step: Double = 1.0 / 30, cardSize: Pt = LeafSVG.cardSlot,
+                           transform: MapTransform = .identity,
                            apply: (Int, HoverTracker) -> Void = { _, _ in }) -> [Frame] {
         var tracker = HoverTracker()
         tracker.cardSize = cardSize
         var frames: [Frame] = []
         var t = 0.0, last = Pt(-1, -1)
         for (i, p) in path.enumerated() {
-            if let p { tracker.move(to: p, in: map, at: t); last = p } else { tracker.exit(at: t); tracker.settle(at: t) }
+            if let p {
+                tracker.move(to: transform.toMap(transform.toView(p)), in: map, at: t); last = p
+            } else { tracker.exit(at: t); tracker.settle(at: t) }
             apply(i, tracker)
-            frames.append(Frame(frame: i, x: p?.x ?? last.x, y: p?.y ?? last.y, t: t, hovered: tracker.hovered,
-                                cardShown: tracker.card != nil, cardX: tracker.cardOrigin?.x, cardY: tracker.cardOrigin?.y))
+            frames.append(frame(i, pointer: p, last: last, t: t, tracker: tracker, map: map, transform: transform))
             t += p == nil ? HoverTracker.leaveDelay + 0.01 : step
         }
         return frames
     }
 
-    public static func json(_ frames: [Frame]) -> Data {
+    public static func json(_ frames: [Frame]) -> Data { json(Report(frames)) }
+
+    public static func json(_ report: Report) -> Data {
         let e = JSONEncoder(); e.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return try! e.encode(frames)
+        return try! e.encode(report)
     }
 }

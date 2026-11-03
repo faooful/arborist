@@ -70,11 +70,11 @@ struct LeafMapView: View {
                         .id(id)
                         .transition(.opacity)
                 }
-                .animation(.easeInOut(duration: 0.12), value: id) // content cross-fade
+                .animation(hover.instant ? nil : .easeInOut(duration: 0.12), value: id) // content cross-fade
                 .opacity(hover.cardOpacity)
                 .offset(x: o.x, y: o.y)
                 // Slides to a new corner; with Reduce Motion it jumps (opacity changes still fade).
-                .animation(reduceMotion ? nil : .easeInOut(duration: HoverTracker.duration(reduceMotion: false)), value: o)
+                .animation(reduceMotion || hover.instant ? nil : .easeInOut(duration: HoverTracker.duration(reduceMotion: false)), value: o)
                 // Unpinned, the card lets the pointer through to the leaves under it. Pinned, its buttons work.
                 .allowsHitTesting(v.pinned)
                 .transition(.opacity)

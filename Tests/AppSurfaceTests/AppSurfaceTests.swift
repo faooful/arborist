@@ -34,6 +34,9 @@ final class AppSurfaceTests: XCTestCase {
         _ = (mt.toView(Pt(1, 1)), mt.toMap(Pt(1, 1)), mt.scale, mt.dx, mt.dy, MapTransform.identity, map.hit(view: Pt(1, 1), mt))
         let path = HoverSweep.path(in: map)
         let frames = HoverSweep.run(map, path: path) { _, _ in }
+        let rep = HoverSweep.Report(frames)
+        _ = (rep.summary, rep.mismatches, rep.gapFrames, rep.hoveredCount, HoverSweep.json(rep),
+             HoverSweep.frame(0, pointer: nil, last: Pt(0, 0), t: 0, tracker: tracker, map: map, transform: mt))
         _ = HoverSweep.json(frames + [HoverSweep.Frame(frame: 0, x: 0, y: 0, t: 0, hovered: nil, cardShown: false, cardX: nil, cardY: nil)])
         _ = (LeafPalette.dimOthers, LeafPalette.hoverScale, LeafPalette.dot(ref.worktree.status), LeafPalette.pillText(ref.worktree.status),
              LeafPalette.rebuildableOpacity(leaf.item.state), LeafPalette.rebuildableShade, LeafPalette.cardFill, LeafPalette.cardStroke,
