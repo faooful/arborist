@@ -64,7 +64,7 @@ enum HoverSweepRunner {
         let transform = hover.transform
         let mapFrame = tracking.convert(tracking.bounds, to: host)
         print("map view frame in popover: \(mapFrame), transform: \(transform)")
-        // D22: the tooltip and strip are checked against the real popover (AppKit's layout, not a guess).
+        // D22: the panel is checked against the real popover (AppKit's layout, not a guess).
         let y0 = host.isFlipped ? mapFrame.minY : host.bounds.height - mapFrame.maxY
         hover.setSpace(PopoverSpace(mapOrigin: Pt(mapFrame.minX, y0), size: Pt(host.bounds.width, host.bounds.height), transform: transform))
         print("popover space: \(hover.tracker.space.map { "\($0)" } ?? "none")")
@@ -106,7 +106,10 @@ enum HoverSweepRunner {
             let sf = hover.visible.strip == nil ? nil : hover.drawnStripFrames
             let drawn = HoverSweep.Drawn(mapFrame: Rect(x: mf.minX, y: my, w: mf.width, h: mf.height),
                                          stripHeight: sf == nil ? 0 : PopoverLayout.stripHeight, stripFrames: sf,
-                                         slotFrame: hover.drawnSlotFrame, footerButtons: hover.drawnFooterButtons)
+                                         slotFrame: hover.drawnSlotFrame, footerButtons: hover.drawnFooterButtons,
+                                         restFrames: hover.visible.strip == nil ? hover.drawnRestFrames : nil,
+                                         legend: hover.visible.strip == nil ? hover.drawnLegend : nil,
+                                         transition: hover.panelTransition)
             frames.append(HoverSweep.frame(i, pointer: p, last: last, t: t, tracker: hover.tracker, map: map, transform: transform,
                                            pinTruth: pinTruth, reachTarget: i == reachAt, drawn: drawn))
             let marker = p.map { tracking.convert(CGPoint(x: transform.toView($0).x, y: transform.toView($0).y), to: host) }

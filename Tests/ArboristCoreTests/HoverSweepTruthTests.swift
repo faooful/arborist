@@ -56,8 +56,8 @@ final class HoverSweepTruthTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(target.strip, target.pinned, "the pinned leaf stays in the strip under the button")
         XCTAssertEqual(r.buttonHits, 1)
         XCTAssertGreaterThan(r.hoveredCount, 40)
-        XCTAssertEqual(r.tooltipClipped, 0, "D22: the tooltip is always inside the popover. " + r.summary)
-        XCTAssertGreaterThan(r.tooltipFrames, 40)
+        XCTAssertEqual(r.idleEmptyGapViolations + r.legendTruncations + r.hoverTransitions, 0, "D25. " + r.summary)
+        XCTAssertGreaterThan(r.hoverSwaps, 5)
     }
 
     static func cliBinary() -> URL? {

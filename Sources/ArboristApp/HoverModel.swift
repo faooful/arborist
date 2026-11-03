@@ -17,6 +17,12 @@ final class HoverModel: ObservableObject {
     /// D24: the shared slot's frame and the footer buttons' frames as drawn.
     var drawnSlotFrame: Rect?
     var drawnFooterButtons: [Rect]?
+    /// D25: the resting panel's content frames and legend measures as drawn (popover coordinates).
+    var drawnRestFrames: [Rect]?
+    var drawnLegend: [LegendMeasure]?
+    /// D25: the panel transition for the last published change: a crossfade only rest ↔ details;
+    /// leaf → leaf swaps values instantly. SharedSlot animates from this, and the sweep records it.
+    private(set) var panelTransition: PanelTransition = .none
     /// One pending leave timer at a time; a newer event cancels it. A main-actor Task, so the timer
     /// never touches this model off the main actor.
     private var settleWork: Task<Void, Never>?
@@ -29,7 +35,7 @@ final class HoverModel: ObservableObject {
     /// Layout → view mapping of the map as it is drawn right now (D15). Set by LeafMapView from its real size.
     var transform = MapTransform.identity { didSet { updateSpace() } }
     /// The map's top-left in the popover's coordinate space, and the popover's size (D19, D22). Set from the
-    /// "popover" named coordinate space; the tooltip is placed against the whole popover.
+    /// "popover" named coordinate space.
     var mapOrigin = Pt(0, 0) { didSet { updateSpace() } }
     var popoverSize: Pt? { didSet { updateSpace() } }
 
@@ -64,7 +70,7 @@ final class HoverModel: ObservableObject {
     /// Pointer left the map: clear after the grace period unless it comes back.
     func exit(at t: Double? = nil, animated: Bool = true) {
         tracker.exit(at: t ?? Self.now())
-        publish(animated) // the tooltip goes at once
+        publish(animated)
         scheduleSettle(animated)
     }
 
@@ -88,16 +94,10 @@ final class HoverModel: ObservableObject {
         publish(false)
     }
 
-    /// Esc: unpin, keep the hover (D22).
+    /// Esc: clear the selection, keep the hover (D22, D25).
     func unpin() {
         tracker.unpin()
         publish(true)
-    }
-
-    /// The tooltip's measured size, so placement keeps it inside the popover.
-    func measuredTooltip(_ size: CGSize) {
-        let z = Pt(max(TooltipPlacement.size.x, size.width), max(TooltipPlacement.size.y, size.height))
-        if z != tracker.tooltipSize { tracker.tooltipSize = z; publish(false) }
     }
 
     /// Test hook: applies a due leave right away (time is simulated by the sweep).
@@ -119,9 +119,8 @@ final class HoverModel: ObservableObject {
     private func publish(_ animated: Bool) {
         let next = tracker.visible
         guard next != visible else { return }
-        // The tooltip follows the pointer with no lag: only ring / strip changes animate.
-        let onlyPointer = next.hovered == visible.hovered && next.pinned == visible.pinned
-        if animated && !instant && !onlyPointer {
+        panelTransition = PanelTransition.between(visible.strip, next.strip, reduceMotion: reduceMotion || !animated)
+        if animated && !instant {
             withAnimation(.easeInOut(duration: HoverTracker.duration(reduceMotion: reduceMotion))) { visible = next }
         } else {
             var t = Transaction(); t.disablesAnimations = true

@@ -1,11 +1,11 @@
 import Foundation
 
 /// The popover in its own coordinates (D19, D22): where the map sits, the popover's size, and the map's
-/// layout → view transform. The tooltip is placed and checked against it.
+/// layout → view transform. The panel and footer are placed against it.
 public struct PopoverSpace: Equatable, Sendable {
     /// Top-left of the map view in popover coordinates.
     public var mapOrigin: Pt
-    /// The popover's size; the tooltip always fits inside it.
+    /// The popover's size.
     public var size: Pt
     /// Map layout coordinates → map view coordinates (D15).
     public var transform: MapTransform
@@ -31,22 +31,6 @@ public struct PopoverSpace: Equatable, Sendable {
     }
 }
 
-/// D22: the tooltip that follows the pointer: offset 12 pt right and below, flipped left/up at the
-/// popover's edges, always inside it.
-public enum TooltipPlacement {
-    public static let offset = 12.0, margin = 4.0
-    public static let size = Pt(200, 52)
-
-    public static func place(pointer p: Pt, size: Pt = size, in bounds: Pt) -> Pt {
-        var x = p.x + offset, y = p.y + offset
-        if x + size.x > bounds.x - margin { x = p.x - offset - size.x }
-        if y + size.y > bounds.y - margin { y = p.y - offset - size.y }
-        x = min(max(margin, x), max(margin, bounds.x - size.x - margin))
-        y = min(max(margin, y), max(margin, bounds.y - size.y - margin))
-        return Pt(x, y)
-    }
-}
-
 /// D24: the detail view in the shared slot below the map, in a strict vertical rhythm built from fixed
 /// constants: title row (branch, tag, repo), path, a 4-column grid, the commit message, then the buttons
 /// row (left-aligned to the grid, Remove at the right). Coordinates are relative to the slot's top-left
@@ -66,8 +50,8 @@ public enum StripLayout {
     public static let buttonsY = messageY + messageHeight + messageBelow
     /// The slot's height: the details exactly fill it.
     public static let height = buttonsY + row + padding
-    /// The "Pinned · Esc" label at the title row's right, and the tag's horizontal padding.
-    public static let pinnedWidth = 74.0, tagPadding = 6.0
+    /// The tag's horizontal padding.
+    public static let tagPadding = 6.0
 
     public static let buttons: [(name: String, x: Double, w: Double)] = [
         ("Reveal in Finder", 0, 120), ("Copy remove command", 120 + buttonGap, 150), ("Remove worktree", inner - 130, 130),
@@ -90,31 +74,30 @@ public enum StripLayout {
         return (0..<4).map { Rect(x: r.x + Double($0) * (w + columnGap), y: r.y, w: w, h: r.h) }
     }
 
-    /// The title row's parts for these strings: branch, tag, repo (and the pinned label). The tag keeps its
+    /// The title row's parts for these strings: branch, tag, repo (D25: no pinned label; selection is styling). The tag keeps its
     /// natural width; branch and repo share the rest (branch first, at least 60%), each truncated to its frame.
-    public static func title(branch: String, tag: String, repo: String, pinned: Bool) -> [(name: String, rect: Rect)] {
+    public static func title(branch: String, tag: String, repo: String) -> [(name: String, rect: Rect)] {
         let r = row("title")
-        let end = r.x + r.w - (pinned ? pinnedWidth + titleGap : 0)
+        let end = r.x + r.w
         let tagW = min((LeafText.width(tag, size: 10) + 2 * tagPadding + 1).rounded(.up), 120)
         let avail = max(0, end - r.x - tagW - 2 * titleGap)
         let bNat = LeafText.width(branch, size: 12), rNat = LeafText.width(repo, size: 11, weight: false)
         let bw = min(bNat, max(avail - rNat, avail * 0.6)), rw = max(0, min(rNat, avail - bw))
         let tagX = r.x + bw + titleGap, repoX = tagX + tagW + titleGap
-        var out: [(String, Rect)] = [("branch", Rect(x: r.x, y: r.y, w: bw, h: r.h)),
+        let out: [(String, Rect)] = [("branch", Rect(x: r.x, y: r.y, w: bw, h: r.h)),
                                      ("tag", Rect(x: tagX, y: r.y, w: tagW, h: r.h)),
                                      ("repo", Rect(x: repoX, y: r.y, w: rw, h: r.h))]
-        if pinned { out.append(("pinned", Rect(x: r.x + r.w - pinnedWidth, y: r.y, w: pinnedWidth, h: r.h))) }
         return out
     }
 
     /// Every text and button frame in the details, in the slot's coordinates offset by `strip`'s origin.
-    public static func named(in strip: Rect, branch: String = "", tag: String = "", repo: String = "", pinned: Bool = false) -> [(name: String, rect: Rect)] {
-        let rel = title(branch: branch, tag: tag, repo: repo, pinned: pinned)
+    public static func named(in strip: Rect, branch: String = "", tag: String = "", repo: String = "") -> [(name: String, rect: Rect)] {
+        let rel = title(branch: branch, tag: tag, repo: repo)
             + [("path", row("path"))] + columns.enumerated().map { ("column\($0.offset)", $0.element) } + [("message", row("message"))]
         return rel.map { ($0.0, Rect(x: strip.x + $0.1.x, y: strip.y + $0.1.y, w: $0.1.w, h: $0.1.h)) } + buttons(in: strip)
     }
-    public static func frames(in strip: Rect, branch: String = "", tag: String = "", repo: String = "", pinned: Bool = false) -> [Rect] {
-        named(in: strip, branch: branch, tag: tag, repo: repo, pinned: pinned).map(\.rect)
+    public static func frames(in strip: Rect, branch: String = "", tag: String = "", repo: String = "") -> [Rect] {
+        named(in: strip, branch: branch, tag: tag, repo: repo).map(\.rect)
     }
 
     /// Pairs of frames that overlap (positive area), plus frames not entirely inside `slot`.
@@ -149,6 +132,99 @@ public enum FooterLayout {
     }
 }
 
+/// D25: the resting panel in the shared slot, never blank: the legend row (state filters only), the
+/// storage bar and its labels, then a 2 × 4 summary grid of real values. Fixed rows from these constants,
+/// relative to the slot's top-left; the last row ends `gap` above the bottom padding.
+public enum RestLayout {
+    public static let padding = StripLayout.padding, gap = StripLayout.gap
+    public static let legendY = padding, legendHeight = 18.0
+    public static let barY = legendY + legendHeight + gap, barHeight = 6.0
+    public static let storageY = barY + barHeight + 4, storageHeight = 14.0
+    public static let gridHeight = StripLayout.gridHeight
+    public static let grid1Y = storageY + storageHeight + gap
+    public static let grid2Y = grid1Y + gridHeight + gap
+    /// D25: the largest empty vertical run allowed inside the slot's content area (between its paddings).
+    public static let maxEmptyGap = 12.0
+    /// Legend items: dot 8 + 4, text, 4 + 4 horizontal padding; `itemGap` apart.
+    public static let itemChrome = 20.0, itemGap = 9.0, legendSize = 11.0
+
+    public static func row(_ name: String) -> Rect {
+        let w = StripLayout.inner
+        switch name {
+        case "legend": return Rect(x: padding, y: legendY, w: w, h: legendHeight)
+        case "bar": return Rect(x: padding, y: barY, w: w, h: barHeight)
+        case "storage": return Rect(x: padding, y: storageY, w: w, h: storageHeight)
+        case "grid1": return Rect(x: padding, y: grid1Y, w: w, h: gridHeight)
+        default: return Rect(x: padding, y: grid2Y, w: w, h: gridHeight)
+        }
+    }
+    /// The 8 summary cells: two rows of the detail grid's 4 columns.
+    public static var cells: [Rect] {
+        [grid1Y, grid2Y].flatMap { y in StripLayout.columns.map { Rect(x: $0.x, y: y, w: $0.w, h: gridHeight) } }
+    }
+    /// The legend's labels: Uncommitted, Clean, Stale, Ready (N) (D25: shortened; the grid spells out "Ready to clean"), and Show all when filtered.
+    /// (D25: Caches moved to the summary grid so the row fits.)
+    public static func legendLabels(ready: Int, showAll: Bool) -> [String] {
+        ["Uncommitted", "Clean", "Stale", "Ready (\(ready))"] + (showAll ? ["Show all"] : [])
+    }
+    /// Each legend item's whole frame (with dot and padding) and its text frame, left to right.
+    public static func legend(_ labels: [String]) -> [(label: String, item: Rect, text: Rect)] {
+        let r = row("legend")
+        var x = r.x
+        return labels.map { l in
+            // Room for the active (semibold) weight too.
+            let w = (LeafText.width(l, size: legendSize, weight: false) * 1.06 + 2).rounded(.up)
+            let item = Rect(x: x, y: r.y, w: w + itemChrome, h: r.h)
+            x += item.w + itemGap
+            return (l, item, Rect(x: item.x + 16, y: r.y, w: w, h: r.h))
+        }
+    }
+    /// Every content frame of the resting panel (legend items, bar, storage row, 8 cells), offset by `slot`.
+    public static func frames(in slot: Rect, legend labels: [String]) -> [Rect] {
+        (legend(labels).map(\.item) + [row("bar"), row("storage")] + cells)
+            .map { Rect(x: slot.x + $0.x, y: slot.y + $0.y, w: $0.w, h: $0.h) }
+    }
+    /// The largest empty vertical run inside the slot's content area (between the top and bottom padding).
+    public static func emptyGap(_ frames: [Rect], in slot: Rect) -> Double {
+        let top = slot.y + padding, bottom = slot.y + slot.h - padding
+        var y = top, gap = 0.0
+        for f in frames.sorted(by: { $0.y < $1.y }) {
+            gap = max(gap, f.y - y); y = max(y, f.y + f.h)
+        }
+        return max(gap, bottom - y)
+    }
+}
+
+/// D25: the resting panel's summary grid, from the shown (filtered) scan: real computed values.
+public enum RestSummary {
+    public static func cells(_ r: ScanResult) -> [(label: String, value: String)] {
+        let all = r.repos.flatMap(\.worktrees), t = r.totals
+        let ready = all.filter(CleanupSafety.isReady)
+        func n(_ k: StateKey) -> String { "\(all.filter { StateKey.colour($0) == k }.count)" }
+        return [("Worktrees", "\(all.count) in \(r.repos.count) repos"), ("Size", Format.bytes(t.projectsSource + t.projectsRebuildable)),
+                ("Rebuildable", Format.bytes(t.projectsRebuildable)),
+                ("Ready to clean", "\(ready.count) · \(Format.bytes(ready.reduce(0) { $0 + $1.size.total }))"),
+                ("Uncommitted", n(.uncommitted)), ("Clean", n(.clean)), ("Stale", n(.stale)), ("Caches", Format.bytes(t.caches))]
+    }
+}
+
+/// D25: how the panel changes between two frames: a crossfade only between rest and details; from one
+/// leaf to another the values swap instantly (and nothing animates with Reduce Motion).
+public enum PanelTransition: String, Codable, Sendable {
+    case none, crossfade
+    public static func between(_ a: String?, _ b: String?, reduceMotion: Bool = false) -> PanelTransition {
+        !reduceMotion && (a == nil) != (b == nil) ? .crossfade : .none
+    }
+}
+
+/// D25: one legend item as drawn: its label's natural width and the text frame it got.
+public struct LegendMeasure: Codable, Equatable, Sendable {
+    public var label: String, natural: Double, frame: Rect
+    public init(label: String, natural: Double, frame: Rect) { self.label = label; self.natural = natural; self.frame = frame }
+    /// Truncated: the label needs more than its frame, or the frame runs past the slot's content edge.
+    public func truncated(rowRight: Double) -> Bool { natural > frame.w + 0.5 || frame.x + frame.w > rowRight + 0.5 }
+}
+
 /// D24: one title-row layout case (a leaf, or a synthetic extreme) and how many overlaps it has.
 public struct LayoutCase: Codable, Equatable, Sendable {
     public var name: String
@@ -167,17 +243,10 @@ public struct LayoutCase: Codable, Equatable, Sendable {
                              ("extreme empty", "", "", ""), ("extreme mid/long tag", mid, String(repeating: "T", count: 80), mid)] {
             strings.append((n, b, t, p))
         }
-        return strings.flatMap { s in [false, true].map { pin in
-            LayoutCase(name: s.0 + (pin ? " (pinned)" : ""),
-                       overlaps: StripLayout.overlaps(StripLayout.frames(in: slot, branch: s.1, tag: s.2, repo: s.3, pinned: pin), in: slot))
-        } }
+        return strings.map { s in
+            LayoutCase(name: s.0, overlaps: StripLayout.overlaps(StripLayout.frames(in: slot, branch: s.1, tag: s.2, repo: s.3), in: slot))
+        }
     }
-}
-
-/// D22: the tooltip's three facts.
-public struct LeafTooltip: Equatable, Sendable {
-    public var branch: String, repo: String, size: String
-    public init(_ c: HoverCard) { branch = c.branch; repo = c.repo; size = c.size }
 }
 
 /// Hover state for the leaf map (D13, D15, D16, D22). The app's mouse tracking and the `--hover-sweep` hook
@@ -185,11 +254,10 @@ public struct LeafTooltip: Equatable, Sendable {
 ///
 /// - **Leaf under the pointer.** A point resolves to the leaf under it or, in a gutter, the nearest leaf
 ///   edge within `LeafMap.hitRadius`, at once (no dwell). In a far gap or off the map it clears after `leaveDelay`.
-/// - **Tooltip.** While a leaf is hovered and the pointer is on the map, a small tooltip follows the pointer
-///   (`tooltipOrigin`). It never takes hit-testing.
-/// - **Strip.** The docked strip shows `strip`: the pinned leaf, else the hovered one.
-/// - **Pin.** Clicking a leaf pins it to the strip (again: unpin); clicking empty space or Esc unpins.
-///   Hover still rings other leaves and moves the tooltip while pinned.
+/// - **Panel.** The bottom panel shows `strip`: the selected (pinned) leaf, else the hovered one (D25: no
+///   floating tooltip; the panel is the only readout, DaisyDisk-style).
+/// - **Select.** Clicking a leaf selects it (again: deselect); clicking empty space or Esc clears it.
+///   Hover still outlines other leaves while one is selected.
 public struct HoverTracker: Equatable, Sendable {
     /// Grace before a leave takes effect (D16).
     public static let leaveDelay = 0.08
@@ -200,10 +268,8 @@ public struct HoverTracker: Equatable, Sendable {
     public private(set) var clearAt: Double?
     /// Pointer in map coordinates while it is on the map.
     public private(set) var pointer: Pt?
-    /// The popover the tooltip is placed in. Nil: the map itself.
+    /// The popover the panel is placed in (sweep checks).
     public var space: PopoverSpace?
-    public var tooltipSize = TooltipPlacement.size
-    private var bounds = Pt(0, 0)
 
     public init() {}
 
@@ -214,7 +280,6 @@ public struct HoverTracker: Equatable, Sendable {
     @discardableResult
     public mutating func move(to p: Pt, in map: LeafMap, at t: Double) -> Bool {
         let before = visible
-        bounds = Pt(map.width, map.height)
         pointer = p
         if let leaf = map.hit(at: p) {
             clearAt = nil
@@ -245,9 +310,9 @@ public struct HoverTracker: Equatable, Sendable {
     public mutating func unpin() { pinned = nil }
 
     /// Popover closed: drop the pin and the hover at once.
-    public mutating func reset() { let s = space, z = tooltipSize; self = HoverTracker(); space = s; tooltipSize = z }
+    public mutating func reset() { let s = space; self = HoverTracker(); space = s }
 
-    /// Pointer left the map at `t`: the tooltip goes at once, the hover after `leaveDelay`. A pin stays.
+    /// Pointer left the map at `t`: the hover clears after `leaveDelay`. A selection stays.
     public mutating func exit(at t: Double) {
         pointer = nil
         if hovered != nil, clearAt == nil { clearAt = t + Self.leaveDelay }
@@ -269,22 +334,13 @@ public struct HoverTracker: Equatable, Sendable {
         return true
     }
 
-    /// The tooltip's top-left (popover coordinates with a space, else map coordinates), while shown.
-    public var tooltipOrigin: Pt? {
-        guard hovered != nil, let p = pointer else { return nil }
-        if let s = space { return TooltipPlacement.place(pointer: s.toPopover(p), size: tooltipSize, in: s.size) }
-        return TooltipPlacement.place(pointer: p, size: tooltipSize, in: bounds)
-    }
-    public var tooltipRect: Rect? { tooltipOrigin.map { Rect(x: $0.x, y: $0.y, w: tooltipSize.x, h: tooltipSize.y) } }
-
     /// What the view draws; a change here is one animation transaction.
     public struct Visible: Equatable, Sendable {
         public var hovered: String?
         public var pinned: String?
         public var strip: String?
-        public var tooltipOrigin: Pt?
     }
-    public var visible: Visible { Visible(hovered: hovered, pinned: pinned, strip: strip, tooltipOrigin: tooltipOrigin) }
+    public var visible: Visible { Visible(hovered: hovered, pinned: pinned, strip: strip) }
 
     /// D22: how a leaf is drawn: others dimmed slightly, a ring on the hovered (2 pt) and pinned (stronger) leaf.
     public func appearance(of id: String) -> (opacity: Double, ring: Double) {
@@ -320,9 +376,6 @@ public enum HoverSweep {
         public var snappedTo: String?
         /// The leaf the sweep pinned (its own record, not the tracker's).
         public var pinTruth: String?
-        /// The tooltip's rect in popover coordinates, while shown.
-        public var tooltipRect: Rect?
-        public var tooltipClipped: Bool
         /// The strip button under the pointer, if any.
         public var buttonUnderPointer: String?
         /// End of the pin + reach-the-strip path: must be on a button with the pin held.
@@ -341,15 +394,22 @@ public enum HoverSweep {
         public var overlaps = 0
         /// D24: a footer button is missing, empty, outside the popover or under the slot.
         public var footerHidden = false
+        /// D25: at rest, the largest empty vertical run in the panel (nil when details show or not measured).
+        public var idleEmptyGap: Double?
+        /// D25: legend items whose label doesn't fit its frame, and the measures (idle frames).
+        public var legendTruncated = 0
+        public var legend: [LegendMeasure]?
+        /// D25: the panel transition applied for this frame.
+        public var transition: PanelTransition = .none
 
         public init(frame: Int, x: Double, y: Double, viewX: Double? = nil, viewY: Double? = nil, t: Double,
                     hovered: String?, pinned: String? = nil, strip: String? = nil, underPointer: String? = nil,
-                    inGap: Bool = false, snappedTo: String? = nil, pinTruth: String? = nil, tooltipRect: Rect? = nil,
-                    tooltipClipped: Bool = false, buttonUnderPointer: String? = nil, reachTarget: Bool = false) {
+                    inGap: Bool = false, snappedTo: String? = nil, pinTruth: String? = nil,
+                    buttonUnderPointer: String? = nil, reachTarget: Bool = false) {
             self.frame = frame; self.x = x; self.y = y; self.viewX = viewX ?? x; self.viewY = viewY ?? y; self.t = t
             self.hovered = hovered; self.pinned = pinned; self.strip = strip; self.underPointer = underPointer
-            self.inGap = inGap; self.snappedTo = snappedTo; self.pinTruth = pinTruth; self.tooltipRect = tooltipRect
-            self.tooltipClipped = tooltipClipped; self.buttonUnderPointer = buttonUnderPointer; self.reachTarget = reachTarget
+            self.inGap = inGap; self.snappedTo = snappedTo; self.pinTruth = pinTruth
+            self.buttonUnderPointer = buttonUnderPointer; self.reachTarget = reachTarget
         }
 
         /// What should be hovered once the grace has passed (D16): the leaf under the pointer, else the snap.
@@ -361,11 +421,13 @@ public enum HoverSweep {
             try c.encode(hovered, forKey: .hovered); try c.encode(pinned, forKey: .pinned); try c.encode(strip, forKey: .strip)
             try c.encode(underPointer, forKey: .underPointer); try c.encode(inGap, forKey: .inGap)
             try c.encode(snappedTo, forKey: .snappedTo); try c.encode(pinTruth, forKey: .pinTruth)
-            try c.encode(tooltipRect, forKey: .tooltipRect); try c.encode(tooltipClipped, forKey: .tooltipClipped)
             try c.encode(buttonUnderPointer, forKey: .buttonUnderPointer); try c.encode(reachTarget, forKey: .reachTarget)
             try c.encode(stripHeight, forKey: .stripHeight); try c.encode(mapFrame, forKey: .mapFrame); try c.encode(stripFrames, forKey: .stripFrames)
             try c.encode(slotFrame, forKey: .slotFrame); try c.encode(footerButtons, forKey: .footerButtons)
             try c.encode(overlaps, forKey: .overlaps); try c.encode(footerHidden, forKey: .footerHidden)
+            try c.encode(idleEmptyGap, forKey: .idleEmptyGap); try c.encode(legendTruncated, forKey: .legendTruncated)
+            try c.encode(legend, forKey: .legend)
+            try c.encode(transition, forKey: .transition)
         }
 
         public var expected: String? { underPointer ?? snappedTo }
@@ -391,13 +453,10 @@ public enum HoverSweep {
         public var distinctHovered: Int
         /// D22: frames whose strip shows something other than pinned ?? expected. Expected 0.
         public var stripMismatches: Int
-        /// D22: frames whose tooltip isn't fully inside the popover. Expected 0.
-        public var tooltipClipped: Int
         /// D22: reach targets that missed a strip button or lost the pin. Expected 0.
         public var reachFailures: Int
         /// D22: reach targets on a button with the pin held.
         public var buttonHits: Int
-        public var tooltipFrames: Int
         /// D24: frames where the strip has height at rest, or the wrong height when shown. Expected 0.
         public var idleStripViolations: Int
         /// D24: frames where the map frame differs from frame 0's (idle, hover, pin). Expected 0.
@@ -413,6 +472,16 @@ public enum HoverSweep {
         /// D24: text/button overlaps in drawn frames plus every layout case. Expected 0.
         public var overlaps: Int
         public var layoutCases: [LayoutCase]
+        /// D25: idle frames whose panel has an empty vertical run over RestLayout.maxEmptyGap. Expected 0.
+        public var idleEmptyGapViolations: Int
+        public var maxIdleEmptyGap: Double
+        /// D25: truncated legend items, summed over idle frames. Expected 0.
+        public var legendTruncations: Int
+        /// D25: leaf → different leaf frames that animated (must swap instantly). Expected 0.
+        public var hoverTransitions: Int
+        /// D25: leaf → leaf frames checked, and rest ↔ details frames (which may crossfade).
+        public var hoverSwaps: Int
+        public var restSwaps: Int
 
         public init(_ frames: [Frame], cases: [LayoutCase] = []) {
             self.frames = frames
@@ -423,10 +492,8 @@ public enum HoverSweep {
             gapFrames = frames.filter(\.inGap).count
             distinctHovered = Set(frames.compactMap(\.hovered)).count
             stripMismatches = frames.filter(\.isStripMismatch).count
-            tooltipClipped = frames.filter(\.tooltipClipped).count
             reachFailures = frames.filter(\.isReachFailure).count + (frames.contains(where: \.reachTarget) ? 0 : 1)
             buttonHits = frames.filter { $0.reachTarget && !$0.isReachFailure }.count
-            tooltipFrames = frames.filter { $0.tooltipRect != nil }.count
             idleStripViolations = frames.filter(\.isIdleStripViolation).count
             let map0 = frames.first?.mapFrame
             mapFrameShifts = frames.filter { $0.mapFrame == nil || $0.mapFrame != map0 }.count
@@ -438,6 +505,16 @@ public enum HoverSweep {
             slotFrameShifts = frames.filter { $0.slotFrame == nil || $0.slotFrame != slot0 }.count
             footerHiddenFrames = frames.filter(\.footerHidden).count
             overlaps = frames.map(\.overlaps).reduce(0, +) + cases.map(\.overlaps).reduce(0, +)
+            let gaps = frames.compactMap(\.idleEmptyGap)
+            idleEmptyGapViolations = gaps.filter { $0 > RestLayout.maxEmptyGap + 0.01 }.count
+                + frames.filter { $0.strip == nil && $0.idleEmptyGap == nil }.count
+            maxIdleEmptyGap = gaps.max() ?? 0
+            legendTruncations = frames.map(\.legendTruncated).reduce(0, +)
+            let pairs = zip(frames, frames.dropFirst())
+            let swaps = pairs.filter { $0.strip != nil && $1.strip != nil && $0.strip != $1.strip }
+            hoverSwaps = swaps.count
+            hoverTransitions = swaps.filter { $1.transition != .none }.count
+            restSwaps = pairs.filter { ($0.strip == nil) != ($1.strip == nil) }.count
         }
 
         public init(from decoder: Decoder) throws {
@@ -447,13 +524,15 @@ public enum HoverSweep {
         enum K: String, CodingKey { case frames, layoutCases }
 
         public var summary: String {
-            "\(frames.count) frames, \(hoveredCount) hovered, \(distinctHovered) distinct leaves, \(gapFrames) in gaps, \(tooltipFrames) with tooltip, "
-                + "\(mismatches) mismatches, \(stripMismatches) strip mismatches, \(tooltipClipped) clipped tooltips, "
+            "\(frames.count) frames, \(hoveredCount) hovered, \(distinctHovered) distinct leaves, \(gapFrames) in gaps, "
+                + "\(mismatches) mismatches, \(stripMismatches) strip mismatches, "
                 + "\(reachFailures) reach failures, \(buttonHits) button hits, "
                 + "\(idleFrames) idle / \(pinnedFrames) pinned, \(idleStripViolations) idle-strip violations, "
                 + "\(mapFrameShifts) map frame shifts, \(stripLayoutShifts) strip layout shifts, "
                 + "\(slotFrameShifts) slot frame shifts, \(footerHiddenFrames) footer-hidden frames, "
-                + "\(overlaps) overlaps (\(layoutCases.count) layout cases)"
+                + "\(overlaps) overlaps (\(layoutCases.count) layout cases), "
+                + "\(idleEmptyGapViolations) idle-gap violations (max \(String(format: "%.0f", maxIdleEmptyGap)) pt), "
+                + "\(legendTruncations) legend truncations, \(hoverTransitions) hover transitions (\(hoverSwaps) leaf swaps, \(restSwaps) rest swaps)"
                 + (mismatches > 0 ? " (frames \(mismatchFrames.map(String.init).joined(separator: ", ")))" : "")
         }
     }
@@ -473,18 +552,23 @@ public enum HoverSweep {
         let onMap = p != nil && q.x >= 0 && q.y >= 0 && q.x <= map.width && q.y <= map.height
         let truth = onMap ? underPointer(v, in: map, transform) : nil
         let gap = onMap && truth == nil
-        let rect = tracker.tooltipRect
-        let clipped = rect.map { tracker.space?.clips($0) ?? !$0.inside(width: map.width, height: map.height) } ?? false
         let button = p.flatMap { pp in tracker.space.flatMap { s in StripLayout.button(at: s.toPopover(pp), in: s.stripRect) } }
         var fr = Frame(frame: i, x: q.x, y: q.y, viewX: v.x, viewY: v.y, t: t, hovered: tracker.hovered,
                      pinned: tracker.pinned, strip: tracker.strip, underPointer: truth, inGap: gap,
-                     snappedTo: gap ? map.hit(at: q)?.item.id : nil, pinTruth: pinTruth, tooltipRect: rect,
-                     tooltipClipped: clipped, buttonUnderPointer: button, reachTarget: reachTarget)
+                     snappedTo: gap ? map.hit(at: q)?.item.id : nil, pinTruth: pinTruth,
+                     buttonUnderPointer: button, reachTarget: reachTarget)
         if let d = drawn {
             fr.stripHeight = d.stripHeight; fr.mapFrame = d.mapFrame; fr.stripFrames = d.stripFrames.map(Self.sorted)
             fr.slotFrame = d.slotFrame; fr.footerButtons = d.footerButtons
             if let sf = d.stripFrames, let slot = d.slotFrame { fr.overlaps = StripLayout.overlaps(sf, in: slot) }
             fr.footerHidden = footerHidden(d.footerButtons, slot: d.slotFrame, popover: tracker.space?.size)
+            if tracker.strip == nil, let slot = d.slotFrame {
+                fr.idleEmptyGap = d.restFrames.map { RestLayout.emptyGap($0, in: slot) } ?? slot.h
+                let right = slot.x + slot.w - RestLayout.padding
+                fr.legend = d.legend
+                fr.legendTruncated = d.legend.map { $0.filter { $0.truncated(rowRight: right) }.count } ?? 1
+            }
+            fr.transition = d.transition
         }
         return fr
     }
@@ -508,9 +592,16 @@ public enum HoverSweep {
         public var stripFrames: [Rect]?
         public var slotFrame: Rect?
         public var footerButtons: [Rect]?
-        public init(mapFrame: Rect, stripHeight: Double, stripFrames: [Rect]?, slotFrame: Rect? = nil, footerButtons: [Rect]? = nil) {
+        /// D25: the resting panel's content frames and legend items (nil while details show).
+        public var restFrames: [Rect]?
+        public var legend: [LegendMeasure]?
+        /// D25: the panel transition the renderer applied for this frame.
+        public var transition: PanelTransition = .none
+        public init(mapFrame: Rect, stripHeight: Double, stripFrames: [Rect]?, slotFrame: Rect? = nil, footerButtons: [Rect]? = nil,
+                    restFrames: [Rect]? = nil, legend: [LegendMeasure]? = nil, transition: PanelTransition = .none) {
             self.mapFrame = mapFrame; self.stripHeight = stripHeight; self.stripFrames = stripFrames
             self.slotFrame = slotFrame; self.footerButtons = footerButtons
+            self.restFrames = restFrames; self.legend = legend; self.transition = transition
         }
     }
 

@@ -100,7 +100,7 @@ final class StateFilterTests: XCTestCase, @unchecked Sendable {
             let r = try JSONDecoder().decode(HoverSweep.Report.self, from: Data(contentsOf: dir.appendingPathComponent("frames.json")))
             XCTAssertEqual(r.mismatches, 0, r.summary)
             XCTAssertEqual(r.stripMismatches, 0, r.summary)
-            XCTAssertEqual(r.tooltipClipped, 0, r.summary)
+            XCTAssertEqual(r.idleEmptyGapViolations + r.legendTruncations + r.hoverTransitions, 0, r.summary)
             XCTAssertEqual(r.reachFailures, 0, r.summary)
             XCTAssertEqual(r.buttonHits, 1, "D22: the pin + reach path ends on a strip button. " + r.summary)
             for f in r.frames { if let h = f.hovered { XCTAssertTrue(ready.contains(h), h) } }
