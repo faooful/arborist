@@ -9,6 +9,7 @@ USAGE:
   arborist free [--json]
   arborist config            print the config file path and contents
   arborist render [--sample|--busy|--from SCAN.json] [--hover N|PATH] --out FILE.svg   worktree leaf map as SVG (N: leaf drawn hovered)
+  arborist render [--sample|--busy|--from SCAN.json] --hover-sweep DIR   hover sweep: frame-NNN.svg + frames.json
   arborist render-stages --out FILE.svg        the four menu bar leaf stages as SVG
 
 Without --root, roots come from ~/.config/arborist/config.json (default: ~ and ~/Documents).
@@ -24,6 +25,7 @@ var roots: [String] = []
 var outPath: String?
 var hoverArg: String?
 var fromPath: String?
+var sweepDir: String?
 var i = 0
 while i < args.count {
     switch args[i] {
@@ -32,6 +34,7 @@ while i < args.count {
     case "--out" where i + 1 < args.count: outPath = args[i + 1]; i += 1
     case "--from" where i + 1 < args.count: fromPath = args[i + 1]; i += 1
     case "--hover" where i + 1 < args.count: hoverArg = args[i + 1]; i += 1
+    case "--hover-sweep" where i + 1 < args.count: sweepDir = args[i + 1]; i += 1
     case "--json", "--sample", "--busy": break
     case "-h", "--help": print(usage); exit(0)
     default: FileHandle.standardError.write("unknown argument: \(args[i])\n\n\(usage)\n".data(using: .utf8)!); exit(2)
@@ -66,6 +69,19 @@ case "render":
     let hover = hoverArg.flatMap { a in Int(a).flatMap { $0 < map.leaves.count ? map.leaves[$0].item.id : nil } ?? map.leaves.first { $0.item.id == a }?.item.id }
     svg = LeafSVG.popover(r, map: map, note: sample ? "sample data · Linux render" : "Linux render", hover: hover,
                           now: sample ? LeafSample.now : Date())
+    if let dir = sweepDir {
+        // Same HoverTracker path as the app's mouse tracking (D15): frame-NNN.svg plus frames.json.
+        try! FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let path = HoverSweep.path(in: map)
+        let frames = HoverSweep.run(map, path: path) { i, t in
+            let svg = LeafSVG.popover(r, map: map, note: "hover sweep · frame \(i)", hover: t.card,
+                                      now: sample ? LeafSample.now : Date(), cardAt: t.cardOrigin, pointer: path[i], cardOpacity: t.cardOpacity)
+            try! svg.write(toFile: dir + String(format: "/frame-%03d.svg", i), atomically: true, encoding: .utf8)
+        }
+        try! HoverSweep.json(frames).write(to: URL(fileURLWithPath: dir + "/frames.json"))
+        print("\(frames.count) frames in \(dir)")
+        exit(0)
+    }
     write(svg)
 case "render-stages":
     write(LeafSVG.stageStrip())

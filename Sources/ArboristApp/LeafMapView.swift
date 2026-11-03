@@ -3,83 +3,81 @@ import ArboristCleanup
 import ArboristCore
 import SwiftUI
 
-/// Draws the worktree leaf map (D12, D13).
+/// Draws the worktree leaf map (D12, D13, D15).
 ///
-/// Hover (D13): the hovered leaf lifts to 1.03× with a soft shadow and the others fade to 0.88, over
-/// ~180 ms ease-in-out. `HoverTracker` debounces gutters so moving between neighbours cross-fades and
-/// the card stays up. With Reduce Motion: no scale or lift, a short opacity-only fade.
-/// `hovered` is shared with the List, so hovering a row lifts its leaf too.
+/// Hover (D15): `HoverModel` is the only source of truth, fed by `MouseTracking` (an NSTrackingArea, because
+/// SwiftUI hover didn't fire in the MenuBarExtra window). Points resolve to the nearest leaf, so gutters and
+/// veins never clear the hover; only leaving the map does, after 80 ms. The card stays in one corner across a
+/// sweep and slides only when the hovered leaf would come near it. Its content cross-fades. The lift
+/// (scale and shadow) is drawing only: hit-testing uses the layout outlines. Reduce Motion: no lift, no
+/// slide, opacity only.
 struct LeafMapView: View {
     @EnvironmentObject var model: AppModel
+    @EnvironmentObject var hover: HoverModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let map: LeafMap
     let result: ScanResult
-    @Binding var hovered: String?
-    @State private var tracker = HoverTracker()
-    @State private var cardRect: CGRect = .zero
-
-    private var anim: Animation { .easeInOut(duration: HoverTracker.duration(reduceMotion: reduceMotion)) }
-    private func now() -> Double { Date().timeIntervalSinceReferenceDate }
 
     var body: some View {
+        // The map fills the popover's width at the layout's aspect ratio. One MapTransform (D15), computed
+        // from the size this view really gets, places the drawing and maps every pointer event back.
+        GeometryReader { g in
+            let t = MapTransform.fit(map, into: Pt(g.size.width, g.size.height))
+            content
+                .frame(width: map.width, height: map.height, alignment: .topLeading)
+                .scaleEffect(t.scale, anchor: .topLeading)
+                .offset(x: t.dx, y: t.dy)
+                .frame(width: g.size.width, height: g.size.height, alignment: .topLeading)
+                // Same frame as the drawing's container, so the tracking area covers exactly what is drawn.
+                .background(MouseTracking(onMove: { p in hover.pointer(view: p, in: map) }, onExit: { hover.exit() }))
+                .contentShape(Rectangle())
+                .onTapGesture(coordinateSpace: .local) { p in hover.click(view: p, in: map) }
+                .onAppear { hover.transform = t }
+                .onChange(of: t) { nt in hover.transform = nt }
+        }
+        .aspectRatio(map.width / map.height, contentMode: .fit)
+        .frame(maxWidth: .infinity)
+        .onExitCommand { hover.reset() }
+        .onDisappear { hover.reset() }
+        .onAppear { hover.reduceMotion = reduceMotion; hover.setCardSize(LeafSVG.cardSlot) }
+        .onChange(of: reduceMotion) { r in hover.reduceMotion = r }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Worktree map: \(result.headline). The list has every worktree.")
+    }
+
+    /// Everything in layout coordinates; LeafMapView.body places it with the transform.
+    @ViewBuilder private var content: some View {
+        let v = hover.visible
         ZStack(alignment: .topLeading) {
             LeafCanvas(map: map, only: nil)
-                .opacity(hovered == nil ? 1 : LeafPalette.dimOthers)
-            if let h = hovered, let leaf = map.leaves.first(where: { $0.item.id == h }) {
+                .opacity(v.hovered == nil ? 1 : LeafPalette.dimOthers)
+            if let h = v.hovered, let leaf = map.leaves.first(where: { $0.item.id == h }) {
+                // Drawing layer only: the scale never reaches hit-testing (MouseTracking and the tap use the map).
                 let a = UnitPoint(x: leaf.centroid.x / map.width, y: leaf.centroid.y / map.height)
                 LeafCanvas(map: map, only: h)
                     .scaleEffect(reduceMotion ? 1 : LeafPalette.hoverScale, anchor: a)
-                    .offset(y: reduceMotion ? 0 : -1)
                     .shadow(color: .black.opacity(reduceMotion ? 0 : 0.16), radius: 5, x: 0, y: 3)
-                    .id(h)
-                    .transition(.opacity)
                     .allowsHitTesting(false)
-            }
-            if let h = hovered, let leaf = map.leaves.first(where: { $0.item.id == h }), let ref = WorktreeList.find(result, path: h) {
-                let card = HoverCard(ref)
-                let (x0, y0, x1, y1) = Geo.bbox(leaf.outline)
-                let size = Pt(LeafSVG.cardWidth, LeafSVG.cardHeight(card) + 26) // + the Remove worktree row (D14)
-                let o = LeafSVG.cardOrigin(avoiding: Rect(x: x0, y: y0, w: x1 - x0, h: y1 - y0), size: size, in: Pt(map.width, map.height))
-                HoverCardView(card: card, ref: ref)
-                    .frame(width: size.x, height: size.y, alignment: .topLeading)
-                    .offset(x: o.x, y: o.y)
-                    .transition(.opacity)
-                    .onAppear { cardRect = CGRect(x: o.x, y: o.y, width: size.x, height: size.y) }
-                    .onChange(of: h) { _ in cardRect = CGRect(x: o.x, y: o.y, width: size.x, height: size.y) }
-                    .onHover { inside in
-                        // Pointer on the card keeps it up so its buttons can be clicked.
-                        if inside { tracker.pointer(tracker.card, at: now()) }
-                    }
             }
             ForEach(map.groupLabels, id: \.name) { g in
                 Text(g.name).font(.system(size: LeafText.groupSize, weight: .medium)).foregroundColor(Theme.ink3)
                     .fixedSize().position(x: g.at.x, y: g.at.y - 4)
                     .allowsHitTesting(false)
             }
-        }
-        .frame(width: map.width, height: map.height)
-        .contentShape(Rectangle())
-        .onContinuousHover(coordinateSpace: .local) { phase in
-            switch phase {
-            case .active(let p):
-                if hovered != nil && cardRect.contains(p) { return }
-                point(map.leaf(at: Pt(p.x, p.y))?.item.id)
-            case .ended:
-                point(nil)
-            }
-        }
-        .onTapGesture(coordinateSpace: .local) { p in
-            if let item = map.leaf(at: Pt(p.x, p.y))?.item, let path = item.path { model.reveal(path) }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Worktree map: \(result.headline). The list has every worktree.")
-    }
-
-    private func point(_ id: String?) {
-        if tracker.pointer(id, at: now()) { withAnimation(anim) { hovered = tracker.hovered } }
-        if id == nil {
-            DispatchQueue.main.asyncAfter(deadline: .now() + HoverTracker.leaveDelay + 0.01) {
-                if tracker.settle(at: now()) { withAnimation(anim) { hovered = tracker.hovered } }
+            if let id = v.card, let o = v.cardOrigin, let ref = WorktreeList.find(result, path: id) {
+                ZStack(alignment: .topLeading) {
+                    HoverCardView(card: HoverCard(ref), ref: ref)
+                        .id(id)
+                        .transition(.opacity)
+                }
+                .animation(.easeInOut(duration: 0.12), value: id) // content cross-fade
+                .opacity(hover.cardOpacity)
+                .offset(x: o.x, y: o.y)
+                // Slides to a new corner; with Reduce Motion it jumps (opacity changes still fade).
+                .animation(reduceMotion ? nil : .easeInOut(duration: HoverTracker.duration(reduceMotion: false)), value: o)
+                // Unpinned, the card lets the pointer through to the leaves under it. Pinned, its buttons work.
+                .allowsHitTesting(v.pinned)
+                .transition(.opacity)
             }
         }
     }

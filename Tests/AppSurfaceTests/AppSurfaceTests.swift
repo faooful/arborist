@@ -24,6 +24,17 @@ final class AppSurfaceTests: XCTestCase {
         var tracker = HoverTracker()
         _ = tracker.pointer(leaf.item.id, at: 0); _ = tracker.settle(at: 1)
         _ = (tracker.card, tracker.hovered, HoverTracker.leaveDelay, HoverTracker.duration(reduceMotion: true))
+        // D15: HoverModel / MouseTracking / the sweep runner.
+        tracker.cardSize = LeafSVG.cardSlot
+        _ = tracker.move(to: Pt(1, 1), in: map, at: 2); tracker.exit(at: 3); _ = tracker.click(at: Pt(1, 1), in: map); tracker.reset()
+        let v: HoverTracker.Visible = tracker.visible
+        _ = (v.hovered, v.card, v.cardOrigin, v.cardUnderPointer, v.pinned, tracker.cardOpacity, tracker.cardOrigin, tracker.cardRect, tracker.pinned)
+        _ = (LeafMap.hitRadius, map.hit(at: Pt(1, 1)), LeafSVG.appCardExtra)
+        let mt = MapTransform.fit(map, into: Pt(448, 400))
+        _ = (mt.toView(Pt(1, 1)), mt.toMap(Pt(1, 1)), mt.scale, mt.dx, mt.dy, MapTransform.identity, map.hit(view: Pt(1, 1), mt))
+        let path = HoverSweep.path(in: map)
+        let frames = HoverSweep.run(map, path: path) { _, _ in }
+        _ = HoverSweep.json(frames + [HoverSweep.Frame(frame: 0, x: 0, y: 0, t: 0, hovered: nil, cardShown: false, cardX: nil, cardY: nil)])
         _ = (LeafPalette.dimOthers, LeafPalette.hoverScale, LeafPalette.dot(ref.worktree.status), LeafPalette.pillText(ref.worktree.status),
              LeafPalette.rebuildableOpacity(leaf.item.state), LeafPalette.rebuildableShade, LeafPalette.cardFill, LeafPalette.cardStroke,
              LeafPalette.barFill, LeafPalette.barTrack, LeafPalette.groupLabel, LeafPalette.staleStroke, LeafPalette.fill(.stale),
