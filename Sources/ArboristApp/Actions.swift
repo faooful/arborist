@@ -28,7 +28,7 @@ extension AppModel: PopoverActionEffects {
 final class SettingsOpener {
     static let shared = SettingsOpener()
     /// macOS 14+: the SwiftUI openSettings action, captured by `SettingsActionBridge` in the popover.
-    var openAction: (() -> Void)?
+    var openAction: (@MainActor () -> Void)?
     /// What happened on the last open (the `--action-check` hook logs it).
     private(set) var lastReport = ""
     private var fallback: NSWindow?
@@ -120,58 +120,58 @@ struct HoverButtonStyle: ButtonStyle {
     var kind: Kind = .plain
     var height: CGFloat? = 22
 
-    func makeBody(configuration: Configuration) -> some View { Body(configuration: configuration, kind: kind, height: height) }
+    func makeBody(configuration: Configuration) -> some View { HoverButtonBody(configuration: configuration, kind: kind, height: height) }
+}
 
-    struct Body: View {
-        let configuration: Configuration
-        let kind: Kind
-        let height: CGFloat?
-        @Environment(\.isEnabled) private var enabled
-        @Environment(\.accessibilityReduceMotion) private var reduceMotion
-        @State private var hovering = false
-        @State private var cursorPushed = false
+struct HoverButtonBody: View {
+    let configuration: ButtonStyleConfiguration
+    let kind: HoverButtonStyle.Kind
+    let height: CGFloat?
+    @Environment(\.isEnabled) private var enabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hovering = false
+    @State private var cursorPushed = false
 
-        var body: some View {
-            let hot = enabled && hovering, down = enabled && configuration.isPressed
-            configuration.label
-                .font(.system(size: kind == .dark ? 12 : 11, weight: kind == .dark ? .medium : .regular))
-                .foregroundColor(fg(hot))
-                .padding(.horizontal, kind == .icon ? 4 : (kind == .dark ? 14 : (kind == .link ? 4 : 8)))
-                .frame(height: kind == .dark ? 28 : height)
-                .background(RoundedRectangle(cornerRadius: kind == .dark ? 7 : 6).fill(bg(hot: hot, down: down)))
-                .overlay(RoundedRectangle(cornerRadius: 6)
-                    .stroke(Color(hex: LeafPalette.cardStroke), lineWidth: kind == .plain ? 0.6 : 0))
-                .opacity(enabled ? 1 : 0.4)
-                .contentShape(Rectangle())
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: hot)
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.06), value: down)
-                .onHover { inside in
-                    hovering = inside
-                    setCursor(inside && enabled)
-                }
-                .onChange(of: enabled) { e in setCursor(e && hovering) }
-                .onDisappear { setCursor(false) }
-        }
-
-        private func setCursor(_ hand: Bool) {
-            if hand && !cursorPushed { NSCursor.pointingHand.push(); cursorPushed = true }
-            if !hand && cursorPushed { NSCursor.pop(); cursorPushed = false }
-        }
-
-        private func fg(_ hot: Bool) -> Color {
-            switch kind {
-            case .dark: return Color(hex: LeafPalette.labelOnDark)
-            case .plain: return Theme.ink
-            case .icon, .link: return hot ? Theme.ink : Theme.ink2
+    var body: some View {
+        let hot = enabled && hovering, down = enabled && configuration.isPressed
+        configuration.label
+            .font(.system(size: kind == .dark ? 12 : 11, weight: kind == .dark ? .medium : .regular))
+            .foregroundColor(fg(hot))
+            .padding(.horizontal, kind == .icon ? 4 : (kind == .dark ? 14 : (kind == .link ? 4 : 8)))
+            .frame(height: kind == .dark ? 28 : height)
+            .background(RoundedRectangle(cornerRadius: kind == .dark ? 7 : 6).fill(bg(hot: hot, down: down)))
+            .overlay(RoundedRectangle(cornerRadius: 6)
+                .stroke(Color(hex: LeafPalette.cardStroke), lineWidth: kind == .plain ? 0.6 : 0))
+            .opacity(enabled ? 1 : 0.4)
+            .contentShape(Rectangle())
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: hot)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.06), value: down)
+            .onHover { inside in
+                hovering = inside
+                setCursor(inside && enabled)
             }
-        }
+            .onChange(of: enabled) { e in setCursor(e && hovering) }
+            .onDisappear { setCursor(false) }
+    }
 
-        private func bg(hot: Bool, down: Bool) -> Color {
-            switch kind {
-            case .dark: return Color(hex: LeafPalette.button).opacity(down ? 0.75 : (hot ? 0.88 : 1))
-            case .plain: return down ? Theme.line : (hot ? Theme.line.opacity(0.55) : Color(hex: LeafPalette.background))
-            case .icon, .link: return down ? Theme.line : (hot ? Theme.line.opacity(0.6) : .clear)
-            }
+    private func setCursor(_ hand: Bool) {
+        if hand && !cursorPushed { NSCursor.pointingHand.push(); cursorPushed = true }
+        if !hand && cursorPushed { NSCursor.pop(); cursorPushed = false }
+    }
+
+    private func fg(_ hot: Bool) -> Color {
+        switch kind {
+        case .dark: return Color(hex: LeafPalette.labelOnDark)
+        case .plain: return Theme.ink
+        case .icon, .link: return hot ? Theme.ink : Theme.ink2
+        }
+    }
+
+    private func bg(hot: Bool, down: Bool) -> Color {
+        switch kind {
+        case .dark: return Color(hex: LeafPalette.button).opacity(down ? 0.75 : (hot ? 0.88 : 1))
+        case .plain: return down ? Theme.line : (hot ? Theme.line.opacity(0.55) : Color(hex: LeafPalette.background))
+        case .icon, .link: return down ? Theme.line : (hot ? Theme.line.opacity(0.6) : .clear)
         }
     }
 }
