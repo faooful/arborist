@@ -17,5 +17,7 @@ let package = Package(
         // The app's SwiftUI code is wrapped in `#if os(macOS)`; on Linux it builds a stub.
         .executableTarget(name: "ArboristApp", dependencies: ["ArboristCore", "ArboristCleanup"]),
         .testTarget(name: "ArboristCoreTests", dependencies: ["ArboristCore", "ArboristCleanup"]),
+        // Non-@testable: compiles the app's calls into Core against the public API only (the app isn't built on Linux).
+        .testTarget(name: "AppSurfaceTests", dependencies: ["ArboristCore", "ArboristCleanup"]),
     ]
 )

@@ -18,7 +18,7 @@ struct ParkMiller {
     mutating func next() -> Double { s = (s * 16807) % 2147483647; return Double(s) / 2147483647 }
 }
 
-enum Geo {
+public enum Geo {
     static func signedArea(_ p: [Pt]) -> Double {
         guard p.count >= 3 else { return 0 }
         var a = 0.0
@@ -123,7 +123,7 @@ enum Geo {
         return o
     }
 
-    static func bbox(_ p: [Pt]) -> (Double, Double, Double, Double) {
+    public static func bbox(_ p: [Pt]) -> (Double, Double, Double, Double) {
         (p.map(\.x).min() ?? 0, p.map(\.y).min() ?? 0, p.map(\.x).max() ?? 0, p.map(\.y).max() ?? 0)
     }
 
