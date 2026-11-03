@@ -11,11 +11,14 @@ import SwiftUI
 /// bar item, and cleanup is disabled: the model refuses every cleanup call, and this checks that nothing ran.
 @MainActor
 enum HoverSweepRunner {
-    static func requestedDirectory() -> String? {
+    static func requestedDirectory() -> String? { requestedValue(for: "--hover-sweep") }
+
+    /// `flag VALUE` from the arguments, only with ARBORIST_HOVER_SWEEP=1 (DEBUG builds only).
+    static func requestedValue(for flag: String) -> String? {
         let args = CommandLine.arguments
-        guard let i = args.firstIndex(of: "--hover-sweep"), i + 1 < args.count else { return nil }
+        guard let i = args.firstIndex(of: flag), i + 1 < args.count else { return nil }
         guard ProcessInfo.processInfo.environment["ARBORIST_HOVER_SWEEP"] == "1" else {
-            FileHandle.standardError.write(Data("--hover-sweep needs ARBORIST_HOVER_SWEEP=1\n".utf8))
+            FileHandle.standardError.write(Data("\(flag) needs ARBORIST_HOVER_SWEEP=1\n".utf8))
             exit(2)
         }
         return args[i + 1]
@@ -86,6 +89,48 @@ enum HoverSweepRunner {
         window.orderOut(nil)
         print(report.summary)
         print("frames in \(dir)")
+    }
+
+    /// `--snapshot PNG` (D17): the popover in the cached + scanning state, hosted and sized the way the
+    /// MenuBarExtra window sizes it (the content's fitting size). Prints the popover size and the map frame;
+    /// exits 3 if the map isn't 448×400.
+    static func snapshot(to png: String) {
+        let limit = deadlineSeconds
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + limit) {
+            FileHandle.standardError.write(Data("snapshot: timed out after \(Int(limit)) s\n".utf8))
+            exit(2)
+        }
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.prohibited)
+        let scan = ScanCache.load() ?? Scanner(config: ArboristConfig.load()).scan()
+        let model = AppModel(sweepWith: scan)
+        precondition(model.cleanupDisabled, "snapshot must run with cleanup disabled")
+        let total = scan.repos.count
+        model.simulateCachedScanning(done: max(0, total - 2), total: total)
+        let host = NSHostingView(rootView: PopoverView().environmentObject(model).environmentObject(model.hover))
+        host.frame.size = host.fittingSize
+        let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -10_000, y: -10_000), size: host.fittingSize),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host
+        window.orderFrontRegardless()
+        settle(host)
+        host.frame.size = host.fittingSize
+        settle(host)
+        let size = host.fittingSize
+        print("popover size: \(Int(size.width.rounded()))×\(Int(size.height.rounded()))")
+        var ok = false
+        if let tracking = findTracking(in: host) {
+            let f = tracking.convert(tracking.bounds, to: host)
+            print("map frame: x \(Int(f.minX.rounded())) y \(Int(f.minY.rounded())) \(Int(f.width.rounded()))×\(Int(f.height.rounded()))")
+            ok = abs(f.width - PopoverLayout.mapWidth) < 0.5 && abs(f.height - PopoverLayout.mapHeight) < 0.5
+        } else {
+            print("map frame: none (no map in this state)")
+        }
+        print("transform: \(model.hover.transform)")
+        capture(host, marker: nil, to: png)
+        window.orderOut(nil)
+        print("wrote \(png)")
+        if !ok { FileHandle.standardError.write(Data("snapshot: map is not 448×400\n".utf8)); exit(3) }
     }
 
     /// Lets SwiftUI apply the latest state and lay out.

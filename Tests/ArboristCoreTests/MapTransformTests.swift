@@ -63,3 +63,28 @@ final class MapTransformTests: XCTestCase {
         XCTAssertLessThan(u.toView(Pt(0, 0)).y, u.toView(Pt(0, 400)).y)
     }
 }
+
+/// D17: fixed popover geometry, and no transform from a collapsed frame.
+final class PopoverLayoutTests: XCTestCase {
+    func testLayoutConstantsGiveA448x400Map() {
+        XCTAssertEqual(PopoverLayout.mapWidth, 448)
+        XCTAssertEqual(PopoverLayout.mapHeight, 400)
+        XCTAssertEqual(PopoverLayout.width, PopoverLayout.mapWidth + 2 * PopoverLayout.padding)
+        for r in [LeafSample.busy, LeafSample.scan] {
+            let m = LeafLayout.layout(LeafLayout.groups(from: r), staleCount: r.totals.staleWorktrees)
+            XCTAssertEqual(m.width, 448); XCTAssertEqual(m.height, 400)
+            XCTAssertEqual(MapTransform.usable(m, into: Pt(PopoverLayout.mapWidth, PopoverLayout.mapHeight)), .identity)
+            // Every leaf is inside the frame, so clipping hides nothing.
+            for l in m.leaves { for p in l.outline { XCTAssertTrue(p.x >= 0 && p.y >= 0 && p.x <= 448 && p.y <= 400) } }
+        }
+    }
+
+    func testTransformRejectsZeroAndTinyFrames() {
+        let r = LeafSample.busy
+        let m = LeafLayout.layout(LeafLayout.groups(from: r), staleCount: r.totals.staleWorktrees)
+        for v in [Pt(0, 0), Pt(448, 0), Pt(0, 400), Pt(448, 10), Pt(10, 10), Pt(-5, 400), Pt(.infinity, 400), Pt(.nan, 400)] {
+            XCTAssertNil(MapTransform.usable(m, into: v), "\(v)")
+        }
+        XCTAssertNotNil(MapTransform.usable(m, into: Pt(PopoverLayout.minMapSide, PopoverLayout.minMapSide)))
+    }
+}

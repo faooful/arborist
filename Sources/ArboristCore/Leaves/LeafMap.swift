@@ -208,7 +208,7 @@ public enum LeafLayout {
 
     // MARK: Layout
 
-    public static func layout(_ input: [LeafGroup], width: Double = 448, height: Double = 400,
+    public static func layout(_ input: [LeafGroup], width: Double = PopoverLayout.mapWidth, height: Double = PopoverLayout.mapHeight,
                               seed: String = defaultSeed, staleCount: Int? = nil) -> LeafMap {
         let marginX = 14.0, marginY = 15.0
         let total = input.flatMap(\.items).reduce(0.0) { $0 + $1.weight }

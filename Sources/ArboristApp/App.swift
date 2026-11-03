@@ -10,6 +10,10 @@ import SwiftUI
 enum Entry {
     static func main() {
         #if DEBUG
+        if let png = HoverSweepRunner.requestedValue(for: "--snapshot") {
+            HoverSweepRunner.snapshot(to: png)
+            exit(0)
+        }
         if let dir = HoverSweepRunner.requestedDirectory() {
             HoverSweepRunner.run(into: dir)
             exit(0)

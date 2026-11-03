@@ -34,7 +34,8 @@ struct PopoverView: View {
                 LeafMapView(map: map, result: r)
             } else {
                 Text(model.scanning ? "Looking for repositories and worktrees…" : (model.scanError == nil ? "No scan yet" : "No results"))
-                    .font(.system(size: 11)).foregroundColor(Theme.ink2).frame(width: 448, height: 120)
+                    .font(.system(size: 11)).foregroundColor(Theme.ink2)
+                    .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.mapHeight) // same layout in every state (D17)
             }
             HStack { Key(); Spacer(); Text(model.result.flatMap { Format.cachesTotal($0.caches) } ?? "").font(.system(size: 11)).foregroundColor(Theme.ink2) }
             FreeBar(free: model.freeBytes ?? 0, total: model.result?.volume?.totalBytes ?? 0)
@@ -59,8 +60,9 @@ struct PopoverView: View {
             if showList, let r = model.result { Checklist(result: r).frame(maxHeight: 260) }
             if let results = model.cleanupResults { CleanupResultsView(results: results) }
         }
-        .padding(16)
-        .frame(width: 480)
+        .padding(PopoverLayout.padding)
+        .frame(width: PopoverLayout.width)
+        .fixedSize(horizontal: false, vertical: true) // height = the content's ideal height, never squeezed
         .background(Theme.paper)
         .sheet(item: Binding(get: { model.pendingCleanup.map(CleanupBatch.init) }, set: { if $0 == nil { model.pendingCleanup = nil } })) { batch in
             CleanupConfirmSheet(items: batch.items)

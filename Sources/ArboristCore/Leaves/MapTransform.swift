@@ -21,6 +21,13 @@ public struct MapTransform: Equatable, Sendable {
         return MapTransform(scale: s, dx: origin.x + (view.x - layout.x * s) / 2, dy: origin.y + (view.y - layout.y * s) / 2)
     }
 
+    /// The fit, or nil when the view is smaller than `minSide` on either axis (not laid out yet, or
+    /// collapsed). Callers keep their last good transform and don't draw from a nil one (D17).
+    public static func usable(_ map: LeafMap, into view: Pt, minSide: Double = PopoverLayout.minMapSide) -> MapTransform? {
+        guard view.x.isFinite, view.y.isFinite, view.x >= minSide, view.y >= minSide else { return nil }
+        return fit(map, into: view)
+    }
+
     public static func fit(_ map: LeafMap, into view: Pt, origin: Pt = Pt(0, 0)) -> MapTransform {
         fit(Pt(map.width, map.height), into: view, origin: origin)
     }

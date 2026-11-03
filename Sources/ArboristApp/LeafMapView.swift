@@ -19,10 +19,12 @@ struct LeafMapView: View {
     let result: ScanResult
 
     var body: some View {
-        // The map fills the popover's width at the layout's aspect ratio. One MapTransform (D15), computed
-        // from the size this view really gets, places the drawing and maps every pointer event back.
+        // D17: the map has an explicit, clipped frame (448×400), so the popover window, which sizes itself
+        // to the content's ideal size, can't collapse it. One MapTransform (D15), from the size this view
+        // really gets, places the drawing and maps pointer events back; a frame below the minimum is
+        // ignored (nothing drawn, last good transform kept).
         GeometryReader { g in
-            let t = MapTransform.fit(map, into: Pt(g.size.width, g.size.height))
+            if let t = MapTransform.usable(map, into: Pt(g.size.width, g.size.height)) {
             content
                 .frame(width: map.width, height: map.height, alignment: .topLeading)
                 .scaleEffect(t.scale, anchor: .topLeading)
@@ -34,9 +36,11 @@ struct LeafMapView: View {
                 .onTapGesture(coordinateSpace: .local) { p in hover.click(view: p, in: map) }
                 .onAppear { hover.transform = t }
                 .onChange(of: t) { nt in hover.transform = nt }
+            }
         }
-        .aspectRatio(map.width / map.height, contentMode: .fit)
-        .frame(maxWidth: .infinity)
+        .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.mapHeight)
+        .clipShape(Rectangle())
+        .clipped()
         .onExitCommand { hover.reset() }
         .onDisappear { hover.reset() }
         .onAppear { hover.reduceMotion = reduceMotion; hover.setCardSize(LeafSVG.cardSlot) }
