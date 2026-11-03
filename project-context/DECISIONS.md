@@ -144,3 +144,9 @@ Supersedes D19 and D20. The floating hover card is gone.
 - Hovered leaf gets a 2 pt dark ring (#1f2a1a), pinned 3.5 pt; others dim to 0.92; Reduce Motion respected. No corridor, grace or dwell; hover still works while pinned.
 - All buttons share `HoverButtonStyle` (hover/pressed, pointing hand, disabled greyed). Settings/Quit are gear/power icon buttons; Settings, Quit, Rescan and List go through Core `PopoverActionRouter` (`PopoverActionEffects` seam, fake-tested). Settings: `.regular` + activate, `openSettings` (14+) or `showSettingsWindow:` (13), then front the window or open a fallback; back to `.accessory` on close.
 - Sweep asserts `tooltipClipped`, `stripMismatches`, `mismatches`, `reachFailures` = 0; `--action-check` debug hook (never quits).
+
+## D23: Settings opens key, not just front (2026-11-03)
+On the Mac, `--action-check` showed Settings via the fallback window with front=true, key=false and no openSettings bridge. Causes: the hook never created a PopoverView (so `SettingsActionBridge` never registered) and never finished launching (an inactive app can't have a key window); in the real app the MenuBarExtra panel holds key and macOS 14+ activation is cooperative.
+- Core `SettingsOpening.front(_:)` with a `SettingsWindowDriver` seam fixes the order: close the key panel (orderOut), activate (`NSApp.activate()` on 14+, `activate(ignoringOtherApps:)` on 13), makeKeyAndOrderFront, orderFrontRegardless. Fake-tested.
+- Report reads `isKeyWindow` one run-loop turn later and adds `bridge=` and `active=`.
+- `--action-check` calls `finishLaunching()`, uses `.regular`, and hosts the real PopoverView offscreen once so the bridge registers. Still no menu bar item; the gear in the running app is the real check.

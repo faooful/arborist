@@ -125,9 +125,19 @@ enum HoverSweepRunner {
             exit(2)
         }
         _ = NSApplication.shared
-        NSApp.setActivationPolicy(.accessory) // like the menu bar app; never a status item here
+        // D23: really launch (a window can only become key in an active, launched app). Still no status item:
+        // the App scene isn't created.
+        NSApp.setActivationPolicy(.regular)
+        NSApp.finishLaunching()
         let scan = ScanCache.load() ?? Scanner(config: ArboristConfig.load()).scan()
         let model = AppModel(sweepWith: scan)
+        // D23: host the real PopoverView once, offscreen, so SettingsActionBridge registers openSettings (14+).
+        let bridgeHost = NSHostingView(rootView: PopoverView().environmentObject(model).environmentObject(model.hover))
+        let bridgeWindow = NSWindow(contentRect: NSRect(x: -10_000, y: -10_000, width: 480, height: 700),
+                                    styleMask: [.borderless], backing: .buffered, defer: false)
+        bridgeWindow.contentView = bridgeHost
+        bridgeWindow.orderBack(nil)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         precondition(model.cleanupDisabled, "action-check must run with cleanup disabled")
         let router = model.router
         precondition(router.dryRunQuit, "hook mode must never quit")
@@ -154,6 +164,7 @@ enum HoverSweepRunner {
         while model.scanning && Date() < scanUntil { RunLoop.current.run(until: Date().addingTimeInterval(0.1)) }
         log("rescan finished=\(!model.scanning), repos=\(model.scanned?.repos.count ?? 0), cached=\(model.resultIsCached)")
         precondition(model.pendingCleanup == nil && model.cleanupResults == nil && !model.cleaning, "cleanup must not run")
+        bridgeWindow.orderOut(nil)
         log(done ? "done" : "done (settings unverified)")
     }
 
