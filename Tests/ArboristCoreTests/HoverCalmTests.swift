@@ -2,7 +2,7 @@
 import XCTest
 
 /// D15: nearest-cell hit-testing, the grace period, the stable card anchor, the pin, and the sweep hook.
-final class HoverCalmTests: XCTestCase {
+final class HoverCalmTests: XCTestCase, @unchecked Sendable {
     let map: LeafMap = {
         let r = LeafSample.busy
         return LeafLayout.layout(LeafLayout.groups(from: r), staleCount: r.totals.staleWorktrees)

@@ -1,7 +1,7 @@
 import XCTest
 @testable import ArboristCore
 
-final class DeclutterLayoutTests: XCTestCase {
+final class DeclutterLayoutTests: XCTestCase, @unchecked Sendable {
     var busy: LeafMap { LeafLayout.layout(LeafLayout.groups(from: LeafSample.busy)) }
 
     func testGroupLabelsNeverCollideAndStayInBounds() {
@@ -75,7 +75,7 @@ final class DeclutterLayoutTests: XCTestCase {
     }
 }
 
-final class HoverTrackerTests: XCTestCase {
+final class HoverTrackerTests: XCTestCase, @unchecked Sendable {
     func testEnterMoveLeaveWithDebounce() {
         var h = HoverTracker()
         XCTAssertTrue(h.pointer("a", at: 0))
@@ -107,7 +107,7 @@ final class HoverTrackerTests: XCTestCase {
     }
 }
 
-final class HoverCardFormatTests: XCTestCase {
+final class HoverCardFormatTests: XCTestCase, @unchecked Sendable {
     func testMiddleAbbreviation() {
         let p = "~/conductor/workspaces/property-management/feat-t5b-handover"
         let m = Format.middle(p, max: 38)

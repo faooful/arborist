@@ -2,7 +2,7 @@
 import XCTest
 
 /// D15: drawing and hit-testing share one MapTransform, so every leaf is hit where it is drawn.
-final class MapTransformTests: XCTestCase {
+final class MapTransformTests: XCTestCase, @unchecked Sendable {
     let map: LeafMap = {
         let r = LeafSample.busy
         return LeafLayout.layout(LeafLayout.groups(from: r), staleCount: r.totals.staleWorktrees)
@@ -65,7 +65,7 @@ final class MapTransformTests: XCTestCase {
 }
 
 /// D17: fixed popover geometry, and no transform from a collapsed frame.
-final class PopoverLayoutTests: XCTestCase {
+final class PopoverLayoutTests: XCTestCase, @unchecked Sendable {
     func testLayoutConstantsGiveA448x400Map() {
         XCTAssertEqual(PopoverLayout.mapWidth, 448)
         XCTAssertEqual(PopoverLayout.mapHeight, 400)

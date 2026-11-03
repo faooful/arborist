@@ -3,7 +3,7 @@ import XCTest
 
 /// D20: the card can be reached: it has priority over the leaves under it, a corridor from the leaf to the
 /// card holds it for the grace, another leaf takes over only after the dwell, and its buttons get the click.
-final class CardReachTests: XCTestCase {
+final class CardReachTests: XCTestCase, @unchecked Sendable {
     let map: LeafMap = {
         let r = LeafSample.busy
         return LeafLayout.layout(LeafLayout.groups(from: r), staleCount: r.totals.staleWorktrees)

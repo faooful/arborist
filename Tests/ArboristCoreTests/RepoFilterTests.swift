@@ -4,7 +4,7 @@ import Foundation
 import XCTest
 
 /// D18: the header repo filter.
-final class RepoFilterTests: XCTestCase {
+final class RepoFilterTests: XCTestCase, @unchecked Sendable {
     let scan = LeafSample.busy
     var repos: [Repo] { scan.repos }
     var a: Repo { repos[0] }
@@ -128,7 +128,7 @@ final class RepoFilterTests: XCTestCase {
 }
 
 /// D19: the hover card is placed against the whole popover and always fits.
-final class CardPlacementTests: XCTestCase {
+final class CardPlacementTests: XCTestCase, @unchecked Sendable {
     let bounds = Pt(480, 560), size = LeafSVG.cardSlot
 
     func inside(_ o: Pt) -> Bool { Rect(x: o.x, y: o.y, w: size.x, h: size.y).inside(width: bounds.x, height: bounds.y) }

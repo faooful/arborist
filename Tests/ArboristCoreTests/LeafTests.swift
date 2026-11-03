@@ -1,7 +1,7 @@
 import XCTest
 @testable import ArboristCore
 
-final class LeafLayoutTests: XCTestCase {
+final class LeafLayoutTests: XCTestCase, @unchecked Sendable {
     func testLayoutIsDeterministic() {
         let a = LeafLayout.layout(LeafSample.groups), b = LeafLayout.layout(LeafSample.groups)
         XCTAssertEqual(a, b)
@@ -100,7 +100,7 @@ final class LeafLayoutTests: XCTestCase {
     }
 }
 
-final class LeafStageTests: XCTestCase {
+final class LeafStageTests: XCTestCase, @unchecked Sendable {
     let gb: Int64 = 1_000_000_000
 
     func testBoundariesAtDefaultThreshold() {

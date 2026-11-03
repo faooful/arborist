@@ -5,7 +5,7 @@ import XCTest
 /// The macOS app isn't compiled on Linux, so this compiles the ArboristCore/ArboristCleanup calls the app makes
 /// (LeafMapView, PopoverView, AppModel) against the public API only. A symbol that isn't public breaks this build
 /// on Linux instead of on Joseph's Mac.
-final class AppSurfaceTests: XCTestCase {
+final class AppSurfaceTests: XCTestCase, @unchecked Sendable {
     func testAppFacingAPIIsPublic() throws {
         let result = LeafSample.busy
         let map = LeafLayout.layout(LeafLayout.groups(from: result), staleCount: result.totals.staleWorktrees)
