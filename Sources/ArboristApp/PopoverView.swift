@@ -33,14 +33,11 @@ struct PopoverView: View {
             }
             if let map = model.leafMap, let r = model.result {
                 LeafMapView(map: map, result: r, hovered: $hovered)
-                if let line = Format.cachesLine(r.caches) {
-                    Text(line).font(.system(size: 10.5)).foregroundColor(Theme.ink2).lineLimit(1)
-                }
             } else {
                 Text(model.scanning ? "Looking for repositories and worktrees…" : (model.scanError == nil ? "No scan yet" : "No results"))
                     .font(.system(size: 11)).foregroundColor(Theme.ink2).frame(width: 448, height: 120)
             }
-            Key()
+            HStack { Key(); Spacer(); Text(model.result.flatMap { Format.cachesTotal($0.caches) } ?? "").font(.system(size: 11)).foregroundColor(Theme.ink2) }
             FreeBar(free: model.freeBytes ?? 0, total: model.result?.volume?.totalBytes ?? 0)
             HStack(spacing: 8) {
                 let n = model.leafMap?.staleCount ?? 0
@@ -80,25 +77,14 @@ struct PopoverView: View {
 
 }
 
+/// One legend line, three dots (D13).
 struct Key: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 12) {
-                ForEach([(LeafState.protected, "Uncommitted / unpushed"), (.clean, "Clean"), (.stale, "Merged / stale")], id: \.1) { st, name in
-                    HStack(spacing: 5) {
-                        RoundedRectangle(cornerRadius: 2.5).fill(Color(hex: LeafPalette.fill(st))).frame(width: 9, height: 9)
-                        Text(name)
-                    }
-                }
-            }
-            HStack(spacing: 12) {
-                Text("Worktree"); Text("Main checkout")
+        HStack(spacing: 12) {
+            ForEach([(LeafState.protected, "Uncommitted / unpushed"), (.clean, "Clean"), (.stale, "Merged / stale")], id: \.1) { st, name in
                 HStack(spacing: 5) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 4).fill(Color(hex: LeafPalette.fill(.clean))).frame(width: 18, height: 10)
-                        RoundedRectangle(cornerRadius: 2.5).fill(Color(hex: LeafPalette.rebuildableShade, opacity: LeafPalette.rebuildableOpacity(.clean) * 1.6)).frame(width: 10, height: 5)
-                    }
-                    Text("Rebuildable (node_modules, .build…)")
+                    Circle().fill(Color(hex: LeafPalette.fill(st))).frame(width: 8, height: 8)
+                    Text(name)
                 }
             }
         }

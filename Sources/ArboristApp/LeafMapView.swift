@@ -2,40 +2,57 @@
 import ArboristCore
 import SwiftUI
 
-/// Draws the worktree leaf map (D12) from `LeafLayout` geometry.
-/// Hover lifts and outlines a leaf, dims the rest and shows its card; click reveals it.
-/// `hovered` is shared with the List so the matching row lights up too.
+/// Draws the worktree leaf map (D12, D13).
+///
+/// Hover (D13): the hovered leaf lifts to 1.03× with a soft shadow and the others fade to 0.88, over
+/// ~180 ms ease-in-out. `HoverTracker` debounces gutters so moving between neighbours cross-fades and
+/// the card stays up. With Reduce Motion: no scale or lift, a short opacity-only fade.
+/// `hovered` is shared with the List, so hovering a row lifts its leaf too.
 struct LeafMapView: View {
     @EnvironmentObject var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let map: LeafMap
     let result: ScanResult
     @Binding var hovered: String?
+    @State private var tracker = HoverTracker()
+    @State private var cardRect: CGRect = .zero
+
+    private var anim: Animation { .easeInOut(duration: HoverTracker.duration(reduceMotion: reduceMotion)) }
+    private func now() -> Double { Date().timeIntervalSinceReferenceDate }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            Canvas { ctx, _ in
-                for leaf in map.leaves where leaf.item.id != hovered { draw(leaf, in: &ctx, dim: hovered != nil, lifted: false) }
-                if let h = hovered, let leaf = map.leaves.first(where: { $0.item.id == h }) { draw(leaf, in: &ctx, dim: false, lifted: true) }
-                for g in map.groupLabels {
-                    let t = Text(g.name).font(.system(size: 10.5, weight: .medium)).foregroundColor(Theme.ink3)
-                    if g.vertical {
-                        var c = ctx
-                        c.translateBy(x: g.at.x, y: g.at.y)
-                        c.rotate(by: .degrees(-90))
-                        c.draw(t, at: .zero)
-                    } else {
-                        ctx.draw(t, at: CGPoint(x: g.at.x, y: g.at.y - 3))
-                    }
-                }
+            LeafCanvas(map: map, only: nil)
+                .opacity(hovered == nil ? 1 : LeafPalette.dimOthers)
+            if let h = hovered, let leaf = map.leaves.first(where: { $0.item.id == h }) {
+                let a = UnitPoint(x: leaf.centroid.x / map.width, y: leaf.centroid.y / map.height)
+                LeafCanvas(map: map, only: h)
+                    .scaleEffect(reduceMotion ? 1 : LeafPalette.hoverScale, anchor: a)
+                    .offset(y: reduceMotion ? 0 : -1)
+                    .shadow(color: .black.opacity(reduceMotion ? 0 : 0.16), radius: 5, x: 0, y: 3)
+                    .id(h)
+                    .transition(.opacity)
+                    .allowsHitTesting(false)
             }
-            .frame(width: map.width, height: map.height)
             if let h = hovered, let leaf = map.leaves.first(where: { $0.item.id == h }), let ref = WorktreeList.find(result, path: h) {
                 let card = HoverCard(ref)
+                let (x0, y0, x1, y1) = Geo.bbox(leaf.outline)
                 let size = Pt(LeafSVG.cardWidth, LeafSVG.cardHeight(card))
-                let o = LeafSVG.cardOrigin(near: leaf.centroid, size: size, in: Pt(map.width, map.height))
-                HoverCardView(card: card)
+                let o = LeafSVG.cardOrigin(avoiding: Rect(x: x0, y: y0, w: x1 - x0, h: y1 - y0), size: size, in: Pt(map.width, map.height))
+                HoverCardView(card: card, ref: ref)
                     .frame(width: size.x, height: size.y, alignment: .topLeading)
                     .offset(x: o.x, y: o.y)
+                    .transition(.opacity)
+                    .onAppear { cardRect = CGRect(x: o.x, y: o.y, width: size.x, height: size.y) }
+                    .onChange(of: h) { _ in cardRect = CGRect(x: o.x, y: o.y, width: size.x, height: size.y) }
+                    .onHover { inside in
+                        // Pointer on the card keeps it up so its buttons can be clicked.
+                        if inside { tracker.pointer(tracker.card, at: now()) }
+                    }
+            }
+            ForEach(map.groupLabels, id: \.name) { g in
+                Text(g.name).font(.system(size: LeafText.groupSize, weight: .medium)).foregroundColor(Theme.ink3)
+                    .fixedSize().position(x: g.at.x, y: g.at.y - 4)
                     .allowsHitTesting(false)
             }
         }
@@ -43,21 +60,40 @@ struct LeafMapView: View {
         .contentShape(Rectangle())
         .onContinuousHover(coordinateSpace: .local) { phase in
             switch phase {
-            case .active(let p): hovered = map.leaf(at: Pt(p.x, p.y))?.item.id
-            case .ended: hovered = nil
+            case .active(let p):
+                if hovered != nil && cardRect.contains(p) { return }
+                point(map.leaf(at: Pt(p.x, p.y))?.item.id)
+            case .ended:
+                point(nil)
             }
         }
         .onTapGesture(coordinateSpace: .local) { p in
             if let item = map.leaf(at: Pt(p.x, p.y))?.item, let path = item.path { model.reveal(path) }
         }
-        .contextMenu {
-            if let h = hovered, let ref = WorktreeList.find(result, path: h) {
-                Button("Reveal in Finder") { model.reveal(ref.worktree.path) }
-                if let cmd = ref.worktree.removeCommand { Button("Copy `git worktree remove`") { model.copy(cmd) } }
-            }
-        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Worktree map: \(result.headline). The list has every worktree.")
+    }
+
+    private func point(_ id: String?) {
+        if tracker.pointer(id, at: now()) { withAnimation(anim) { hovered = tracker.hovered } }
+        if id == nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + HoverTracker.leaveDelay + 0.01) {
+                if tracker.settle(at: now()) { withAnimation(anim) { hovered = tracker.hovered } }
+            }
+        }
+    }
+}
+
+/// All leaves (or just `only`) with their branch labels.
+struct LeafCanvas: View {
+    let map: LeafMap
+    let only: String?
+
+    var body: some View {
+        Canvas { ctx, _ in
+            for leaf in map.leaves where only == nil || leaf.item.id == only { draw(leaf, in: &ctx) }
+        }
+        .frame(width: map.width, height: map.height)
     }
 
     private func path(_ pts: [Pt]) -> Path {
@@ -69,13 +105,7 @@ struct LeafMapView: View {
         return p
     }
 
-    private func draw(_ leaf: Leaf, in parent: inout GraphicsContext, dim: Bool, lifted: Bool) {
-        var ctx = parent
-        if dim { ctx.opacity = LeafPalette.dimOthers }
-        if lifted {
-            ctx.translateBy(x: 0, y: -1.5)
-            ctx.addFilter(.shadow(color: .black.opacity(0.22), radius: 4, x: 0, y: 3))
-        }
+    private func draw(_ leaf: Leaf, in ctx: inout GraphicsContext) {
         let st = leaf.item.state, shape = path(leaf.outline)
         ctx.fill(shape, with: .color(Color(hex: LeafPalette.fill(st))))
         if st == .stale { ctx.stroke(shape, with: .color(Color(hex: LeafPalette.staleStroke)), lineWidth: 0.4) }
@@ -92,52 +122,87 @@ struct LeafMapView: View {
                 layer.stroke(p, with: .color(Color(hex: vc, opacity: vo * v.opacity)), style: StrokeStyle(lineWidth: v.width, lineCap: .round))
             }
         }
-        if lifted { ctx.stroke(shape, with: .color(Color(hex: LeafPalette.hoverStroke)), lineWidth: 1.6) }
-        label(leaf, dark: LeafPalette.isDark(st), in: &ctx)
-    }
-
-    private func label(_ leaf: Leaf, dark: Bool, in ctx: inout GraphicsContext) {
-        let lines = leaf.labelLines, c = leaf.centroid
-        let lc = dark ? Color(hex: LeafPalette.labelOnDark) : Color(hex: "#1c1e21")
-        let sc = dark ? Color(hex: LeafPalette.sizeOnDark) : Color(hex: LeafPalette.sizeOnLight)
-        let y0 = c.y - Double(lines.count + (leaf.subLabel == nil ? 0 : 1)) * 12.5 / 2 + 2
-        for (i, line) in lines.enumerated() {
-            ctx.draw(Text(line).font(.system(size: 10.5, weight: .medium)).foregroundColor(lc), at: CGPoint(x: c.x, y: y0 + Double(i) * 12.5))
-        }
-        if leaf.showSize {
-            let y = lines.isEmpty ? c.y : y0 + Double(lines.count) * 12.5
-            ctx.draw(Text(Format.bytes(leaf.item.bytes)).font(.system(size: 10.5)).foregroundColor(sc), at: CGPoint(x: c.x, y: y))
-        }
-        if let sub = leaf.subLabel {
-            ctx.draw(Text(sub).font(.system(size: 10.5)).italic().foregroundColor(sc), at: CGPoint(x: c.x, y: y0 + Double(lines.count + 1) * 12.5))
+        if let name = leaf.labelLines.first {
+            let lc = LeafPalette.isDark(st) ? Color(hex: LeafPalette.labelOnDark) : Color(hex: "#1c1e21")
+            ctx.draw(Text(name).font(.system(size: LeafText.leafSize, weight: .medium)).foregroundColor(lc),
+                     at: CGPoint(x: leaf.centroid.x, y: leaf.centroid.y))
         }
     }
 }
 
-/// The hover card: same fields and order as the SVG render (`HoverCard.lines`).
+/// The hover card (D13): header, 2×2 stats, commit message, footer buttons. Same metrics as the SVG.
 struct HoverCardView: View {
+    @EnvironmentObject var model: AppModel
     let card: HoverCard
+    let ref: WorktreeRef
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 6) {
-                Circle().fill(Color(hex: LeafPalette.dot(card.status))).frame(width: 7, height: 7)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 7) {
                 Text(card.branch).font(.system(size: 12, weight: .semibold)).foregroundColor(Theme.ink).lineLimit(1)
-                Text("· " + card.status.word).font(.system(size: 12)).foregroundColor(Theme.ink2)
+                Text(card.pill).font(.system(size: 10, weight: .medium))
+                    .foregroundColor(Color(hex: LeafPalette.pillText(card.status)))
+                    .padding(.horizontal, 6).frame(height: 14)
+                    .background(Capsule().fill(Color(hex: LeafPalette.dot(card.status), opacity: 0.2)))
             }
-            Group {
-                Text(card.repo)
-                Text(card.path).font(.system(size: 10.5)).truncationMode(.middle)
-                Text(card.lastCommit)
-                Text(card.tracking)
-                Text(card.uncommitted)
-                Text(card.size)
+            Text(card.repo).font(.system(size: 11)).foregroundColor(Theme.ink2).lineLimit(1).padding(.top, 3)
+            Text(card.path).font(.system(size: 10, design: .monospaced)).foregroundColor(Theme.ink2).lineLimit(1)
+                .help(card.fullPath).padding(.top, 2)
+            Rectangle().fill(Color(hex: LeafPalette.cardStroke)).frame(height: 0.6).padding(.vertical, 6)
+            Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
+                GridRow {
+                    stat("Size", card.size) {
+                        GeometryReader { g in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(Color(hex: LeafPalette.barTrack))
+                                Capsule().fill(Color(hex: LeafPalette.barFill)).frame(width: g.size.width * card.rebuildableShare)
+                            }
+                        }
+                        .frame(width: 96, height: 4)
+                        .opacity(card.rebuildableShare > 0 ? 1 : 0)
+                        .help(card.rebuildable ?? "")
+                    }
+                    stat("Changes", card.changes) { EmptyView() }
+                }
+                GridRow {
+                    stat("Sync", card.sync) { EmptyView() }
+                    stat("Last commit", card.lastCommit) { EmptyView() }
+                }
             }
-            .font(.system(size: 11)).foregroundColor(Theme.ink2).lineLimit(1)
-            Text(card.action).font(.system(size: 11, weight: .medium)).foregroundColor(Theme.ink).lineLimit(1)
+            if !card.message.isEmpty {
+                Text(card.message.joined(separator: "\n")).font(.system(size: 11)).foregroundColor(Theme.ink)
+                    .lineLimit(2).fixedSize(horizontal: false, vertical: true).padding(.top, 6)
+            }
+            HStack(spacing: 6) {
+                Button("Reveal in Finder") { model.reveal(ref.worktree.path) }
+                if let cmd = card.removeCommand { Button("Copy remove command") { model.copy(cmd) }.help(cmd) }
+            }
+            .buttonStyle(SubtleButtonStyle())
+            .padding(.top, 8)
         }
-        .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(RoundedRectangle(cornerRadius: 9).fill(Color(hex: LeafPalette.cardFill)).shadow(color: .black.opacity(0.1), radius: 3, y: 2))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color(hex: LeafPalette.cardStroke), lineWidth: 0.8))
+        .padding(10)
+        .frame(width: LeafSVG.cardWidth, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 9).fill(Color(hex: LeafPalette.cardFill)).shadow(color: .black.opacity(0.12), radius: 5, y: 3))
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color(hex: LeafPalette.cardStroke), lineWidth: 0.6))
+    }
+
+    private func stat<Extra: View>(_ label: String, _ value: String, @ViewBuilder extra: () -> Extra) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(.system(size: 10)).foregroundColor(Theme.ink2)
+            Text(value).font(.system(size: 11.5, weight: .medium)).foregroundColor(Theme.ink).lineLimit(1)
+            extra()
+        }
+        .frame(width: (LeafSVG.cardWidth - 28) / 2, alignment: .leading)
+    }
+}
+
+struct SubtleButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 11)).foregroundColor(Theme.ink)
+            .padding(.horizontal, 8).frame(height: 22)
+            .background(RoundedRectangle(cornerRadius: 6).fill(configuration.isPressed ? Theme.line : Color(hex: LeafPalette.background)))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(hex: LeafPalette.cardStroke), lineWidth: 0.6))
     }
 }
 

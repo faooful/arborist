@@ -20,8 +20,8 @@ public enum LeafSVG {
     public static func popover(_ r: ScanResult, map: LeafMap, note: String = "Linux render", hover: String? = nil, now: Date = Date()) -> String {
         let freeBytes = r.volume?.freeBytes ?? 0, totalBytes = r.volume?.totalBytes ?? 0
         let pad = 16.0, w = map.width + pad * 2, mapTop = 52.0
-        let cachesY = mapTop + map.height + 16, keyTop = cachesY + 14
-        let h = keyTop + 110
+        let keyTop = mapTop + map.height + 12
+        let h = keyTop + 92
         var s = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"\(f(w))\" height=\"\(f(h))\" viewBox=\"0 0 \(f(w)) \(f(h))\" font-family=\"-apple-system, 'SF Pro Text', Inter, 'DejaVu Sans', sans-serif\">"
         s += "<rect width=\"100%\" height=\"100%\" rx=\"14\" fill=\"\(LeafPalette.background)\"/>"
         let parts = r.headline.split(separator: " ", maxSplits: 2).map(String.init)   // "40" "worktrees" "in 34 repos · 5 stale"
@@ -30,26 +30,17 @@ public enum LeafSVG {
         s += "</text>"
         s += "<text x=\"\(f(w - pad))\" y=\"36\" text-anchor=\"end\" font-size=\"11.5\" fill=\"\(LeafPalette.inkSoft)\">Arborist</text>"
         s += "<g transform=\"translate(\(pad),\(mapTop))\">" + mapBody(map, hover: hover) + "</g>"
-        if let c = Format.cachesLine(r.caches) {
-            s += "<text x=\"\(pad)\" y=\"\(f(cachesY))\" font-size=\"10.5\" fill=\"\(LeafPalette.inkSoft)\">\(esc(c))</text>"
-        }
-        // Key: states, rebuildable share, kinds.
+        // Footer (D13): one legend line with three dots, and the caches total at the right.
         var x = pad
         for (state, name) in [(LeafState.protected, "Uncommitted / unpushed"), (.clean, "Clean"), (.stale, "Merged / stale")] {
-            s += "<rect x=\"\(f(x))\" y=\"\(f(keyTop))\" width=\"9\" height=\"9\" rx=\"2.5\" fill=\"\(LeafPalette.fill(state))\"/>"
-            s += "<text x=\"\(f(x + 14))\" y=\"\(f(keyTop + 8.5))\" font-size=\"11\" fill=\"\(LeafPalette.inkSoft)\">\(name)</text>"
-            x += 22 + Double(name.count) * 6.0
+            s += "<circle cx=\"\(f(x + 4))\" cy=\"\(f(keyTop + 4.5))\" r=\"4\" fill=\"\(LeafPalette.fill(state))\"/>"
+            s += "<text x=\"\(f(x + 13))\" y=\"\(f(keyTop + 8.5))\" font-size=\"11\" fill=\"\(LeafPalette.inkSoft)\">\(name)</text>"
+            x += 26 + LeafText.width(name, size: 11, weight: false)
         }
-        x = pad
-        for (kind, name) in [(LeafKind.worktree, "Worktree"), (.main, "Main checkout")] {
-            s += "<path transform=\"translate(\(f(x)),\(f(keyTop + 18)))\" d=\"\(keyGlyph(kind))\" fill=\"\(LeafPalette.fill(.clean))\" stroke=\"\(LeafPalette.keyStroke)\" stroke-width=\".5\"/>"
-            s += "<text x=\"\(f(x + 22))\" y=\"\(f(keyTop + 26.5))\" font-size=\"11\" fill=\"\(LeafPalette.inkSoft)\">\(name)</text>"
-            x += 34 + Double(name.count) * 6.0
+        if let c = Format.cachesTotal(r.caches) {
+            s += "<text x=\"\(f(w - pad))\" y=\"\(f(keyTop + 8.5))\" text-anchor=\"end\" font-size=\"11\" fill=\"\(LeafPalette.inkSoft)\">\(esc(c))</text>"
         }
-        s += "<rect x=\"\(f(x))\" y=\"\(f(keyTop + 18))\" width=\"18\" height=\"10\" rx=\"4\" fill=\"\(LeafPalette.fill(.clean))\"/>"
-        s += "<rect x=\"\(f(x + 4))\" y=\"\(f(keyTop + 20.5))\" width=\"10\" height=\"5\" rx=\"2.5\" fill=\"\(LeafPalette.rebuildableShade)\" fill-opacity=\"\(LeafPalette.rebuildableOpacity(.clean) * 1.6)\"/>"
-        s += "<text x=\"\(f(x + 23))\" y=\"\(f(keyTop + 26.5))\" font-size=\"11\" fill=\"\(LeafPalette.inkSoft)\">Rebuildable (node_modules, .build…)</text>"
-        let barY = keyTop + 42, frac = totalBytes > 0 ? 1 - Double(freeBytes) / Double(totalBytes) : 0
+        let barY = keyTop + 24, frac = totalBytes > 0 ? 1 - Double(freeBytes) / Double(totalBytes) : 0
         s += "<rect x=\"\(pad)\" y=\"\(f(barY))\" width=\"\(f(map.width))\" height=\"6\" rx=\"3\" fill=\"\(LeafPalette.barTrack)\"/>"
         s += "<rect x=\"\(pad)\" y=\"\(f(barY))\" width=\"\(f(map.width * frac))\" height=\"6\" rx=\"3\" fill=\"\(LeafPalette.barFill)\"/>"
         s += "<text x=\"\(pad)\" y=\"\(f(barY + 20))\" font-size=\"11\" fill=\"\(LeafPalette.inkSoft)\"><tspan fill=\"\(LeafPalette.ink)\" font-weight=\"500\">\(esc(Format.bytes(freeBytes)))</tspan> free</text>"
@@ -60,38 +51,78 @@ public enum LeafSVG {
         s += "<text x=\"\(f(w - pad))\" y=\"\(f(btnY + 18))\" text-anchor=\"end\" font-size=\"10.5\" fill=\"\(LeafPalette.inkSoft)\">\(note)</text>"
         // Hover card on top of everything.
         if let id = hover, let leaf = map.leaves.first(where: { $0.item.id == id }), let ref = WorktreeList.find(r, path: id) {
-            s += hoverCard(HoverCard(ref, now: now, home: LeafSample.home), near: leaf.centroid + Pt(pad, mapTop), in: Pt(w, h))
+            let (x0, y0, x1, y1) = Geo.bbox(leaf.outline)
+            let card = HoverCard(ref, now: now, home: LeafSample.home)
+            let o = cardOrigin(avoiding: Rect(x: x0, y: y0, w: x1 - x0, h: y1 - y0), size: Pt(cardWidth, cardHeight(card)), in: Pt(map.width, map.height))
+            s += hoverCard(card, at: o + Pt(pad, mapTop))
         }
         return s + "</svg>"
     }
 
-    /// Card size used by the SVG and the app.
-    public static let cardWidth = 250.0
-    public static func cardHeight(_ c: HoverCard) -> Double { 16 + Double(c.lines.count) * 15 }
-
-    /// Where to put a card for a leaf centred at `p`: beside it, kept inside `bounds`.
-    public static func cardOrigin(near p: Pt, size: Pt, in bounds: Pt) -> Pt {
-        var x = p.x + 18, y = p.y - size.y / 2
-        if x + size.x > bounds.x - 6 { x = p.x - 18 - size.x }
-        x = min(max(6, x), bounds.x - size.x - 6)
-        y = min(max(6, y), bounds.y - size.y - 6)
-        return Pt(x, y)
+    /// Card metrics shared by the SVG and the app (D13).
+    public static let cardWidth = 264.0
+    public static func cardHeight(_ c: HoverCard) -> Double {
+        128 + Double(c.message.count) * 14 + (c.message.isEmpty ? 0 : 4) + 8 + 22 + 10
     }
 
-    static func hoverCard(_ c: HoverCard, near p: Pt, in bounds: Pt) -> String {
-        let size = Pt(cardWidth, cardHeight(c)), o = cardOrigin(near: p, size: size, in: bounds)
+    /// Places the card beside the hovered leaf without covering it: right, left, below, then above.
+    /// If none fits inside `bounds`, the one overlapping the leaf least (clamped to bounds) wins.
+    public static func cardOrigin(avoiding leaf: Rect, size: Pt, in bounds: Pt, gap: Double = 10) -> Pt {
+        let cy = leaf.y + leaf.h / 2 - size.y / 2, cx = leaf.x + leaf.w / 2 - size.x / 2
+        func clampY(_ y: Double) -> Double { min(max(4, y), bounds.y - size.y - 4) }
+        func clampX(_ x: Double) -> Double { min(max(4, x), bounds.x - size.x - 4) }
+        let tries = [Pt(leaf.x + leaf.w + gap, clampY(cy)), Pt(leaf.x - gap - size.x, clampY(cy)),
+                     Pt(clampX(cx), leaf.y + leaf.h + gap), Pt(clampX(cx), leaf.y - gap - size.y)]
+        if let ok = tries.first(where: { Rect(x: $0.x, y: $0.y, w: size.x, h: size.y).inside(width: bounds.x, height: bounds.y) }) { return ok }
+        func overlap(_ p: Pt) -> Double {
+            let r = Rect(x: clampX(p.x), y: clampY(p.y), w: size.x, h: size.y)
+            return max(0, min(r.x + r.w, leaf.x + leaf.w) - max(r.x, leaf.x)) * max(0, min(r.y + r.h, leaf.y + leaf.h) - max(r.y, leaf.y))
+        }
+        let best = tries.min { overlap($0) < overlap($1) }!
+        return Pt(clampX(best.x), clampY(best.y))
+    }
+
+    static func hoverCard(_ c: HoverCard, at o: Pt) -> String {
+        let W = cardWidth, H = cardHeight(c), px = 10.0, soft = LeafPalette.inkSoft, ink = LeafPalette.ink
         var s = "<g>"
-        s += "<rect x=\"\(f(o.x + 1))\" y=\"\(f(o.y + 2))\" width=\"\(f(size.x))\" height=\"\(f(size.y))\" rx=\"9\" fill=\"#000\" fill-opacity=\".08\"/>"
-        s += "<rect x=\"\(f(o.x))\" y=\"\(f(o.y))\" width=\"\(f(size.x))\" height=\"\(f(size.y))\" rx=\"9\" fill=\"\(LeafPalette.cardFill)\" stroke=\"\(LeafPalette.cardStroke)\" stroke-width=\".8\"/>"
-        for (i, line) in c.lines.enumerated() {
-            let y = o.y + 20 + Double(i) * 15
-            if i == 0 {
-                s += "<circle cx=\"\(f(o.x + 14))\" cy=\"\(f(y - 4))\" r=\"3.5\" fill=\"\(LeafPalette.dot(c.status))\"/>"
-                s += "<text x=\"\(f(o.x + 23))\" y=\"\(f(y))\" font-size=\"12\" font-weight=\"600\" fill=\"\(LeafPalette.ink)\">\(esc(c.branch))<tspan font-weight=\"400\" fill=\"\(LeafPalette.inkSoft)\"> · \(c.status.word)</tspan></text>"
-            } else {
-                let last = i == c.lines.count - 1
-                s += "<text x=\"\(f(o.x + 12))\" y=\"\(f(y))\" font-size=\"\(i == 2 ? 10.5 : 11)\" fill=\"\(last ? LeafPalette.ink : LeafPalette.inkSoft)\"\(last ? " font-weight=\"500\"" : "")>\(esc(clip(line, 40)))</text>"
+        s += "<filter id=\"cs\" x=\"-20%\" y=\"-20%\" width=\"140%\" height=\"140%\"><feDropShadow dx=\"0\" dy=\"3\" stdDeviation=\"5\" flood-color=\"#000\" flood-opacity=\".12\"/></filter>"
+        s += "<rect x=\"\(f(o.x))\" y=\"\(f(o.y))\" width=\"\(f(W))\" height=\"\(f(H))\" rx=\"9\" fill=\"\(LeafPalette.cardFill)\" stroke=\"\(LeafPalette.cardStroke)\" stroke-width=\".6\" filter=\"url(#cs)\"/>"
+        // Header: branch + pill, repo, path.
+        var y = o.y + 21
+        let bw = LeafText.width(c.branch, size: 12) * 1.04
+        s += "<text x=\"\(f(o.x + px))\" y=\"\(f(y))\" font-size=\"12\" font-weight=\"600\" fill=\"\(ink)\">\(esc(clip(c.branch, 26)))</text>"
+        let pw = LeafText.width(c.pill, size: 10) + 12, pxp = min(o.x + px + bw + 7, o.x + W - px - pw)
+        s += "<rect x=\"\(f(pxp))\" y=\"\(f(y - 10.5))\" width=\"\(f(pw))\" height=\"14\" rx=\"7\" fill=\"\(LeafPalette.dot(c.status))\" fill-opacity=\".2\"/>"
+        s += "<text x=\"\(f(pxp + pw / 2))\" y=\"\(f(y - 0.5))\" text-anchor=\"middle\" font-size=\"10\" font-weight=\"500\" fill=\"\(LeafPalette.pillText(c.status))\">\(esc(c.pill))</text>"
+        y += 15
+        s += "<text x=\"\(f(o.x + px))\" y=\"\(f(y))\" font-size=\"11\" fill=\"\(soft)\">\(esc(c.repo))</text>"
+        y += 14
+        s += "<text x=\"\(f(o.x + px))\" y=\"\(f(y))\" font-size=\"10\" font-family=\"'SF Mono', Menlo, 'DejaVu Sans Mono', monospace\" fill=\"\(soft)\"><title>\(esc(c.fullPath))</title>\(esc(c.path))</text>"
+        y += 10
+        s += "<line x1=\"\(f(o.x + px))\" x2=\"\(f(o.x + W - px))\" y1=\"\(f(y))\" y2=\"\(f(y))\" stroke=\"\(LeafPalette.cardStroke)\" stroke-width=\".6\"/>"
+        // Stats 2×2.
+        let col2 = o.x + W / 2 + 4
+        let stats = [("Size", c.size, o.x + px), ("Changes", c.changes, col2), ("Sync", c.sync, o.x + px), ("Last commit", c.lastCommit, col2)]
+        for (k, st) in stats.enumerated() {
+            let ry = y + 15 + Double(k / 2) * 34
+            s += "<text x=\"\(f(st.2))\" y=\"\(f(ry))\" font-size=\"10\" fill=\"\(soft)\">\(st.0)</text>"
+            s += "<text x=\"\(f(st.2))\" y=\"\(f(ry + 14))\" font-size=\"11.5\" font-weight=\"500\" fill=\"\(ink)\">\(esc(st.1))</text>"
+            if k == 0, c.rebuildableShare > 0 {
+                let bx = st.2, bwid = 96.0
+                s += "<rect x=\"\(f(bx))\" y=\"\(f(ry + 18.5))\" width=\"\(f(bwid))\" height=\"4\" rx=\"2\" fill=\"\(LeafPalette.barTrack)\"><title>\(esc(c.rebuildable ?? ""))</title></rect>"
+                s += "<rect x=\"\(f(bx))\" y=\"\(f(ry + 18.5))\" width=\"\(f(bwid * c.rebuildableShare))\" height=\"4\" rx=\"2\" fill=\"\(LeafPalette.barFill)\"/>"
             }
+        }
+        y += 72
+        for line in c.message { y += 14; s += "<text x=\"\(f(o.x + px))\" y=\"\(f(y))\" font-size=\"11\" fill=\"\(ink)\">\(esc(line))</text>" }
+        y += c.message.isEmpty ? 4 : 10
+        // Footer buttons.
+        var bx = o.x + px
+        for label in ["Reveal in Finder"] + (c.removeCommand == nil ? [] : ["Copy remove command"]) {
+            let wv = LeafText.width(label, size: 11, weight: false) * 1.08 + 16
+            s += "<rect x=\"\(f(bx))\" y=\"\(f(y))\" width=\"\(f(wv))\" height=\"22\" rx=\"6\" fill=\"\(LeafPalette.background)\" stroke=\"\(LeafPalette.cardStroke)\" stroke-width=\".6\"/>"
+            s += "<text x=\"\(f(bx + wv / 2))\" y=\"\(f(y + 15))\" text-anchor=\"middle\" font-size=\"11\" fill=\"\(ink)\">\(label)</text>"
+            bx += wv + 6
         }
         return s + "</g>"
     }
@@ -108,12 +139,15 @@ public enum LeafSVG {
     }
 
     public static func mapBody(_ map: LeafMap, hover: String? = nil) -> String {
-        var s = ""
-        for (i, leaf) in map.leaves.enumerated() {
+        var s = "<filter id=\"ls\" x=\"-20%\" y=\"-20%\" width=\"140%\" height=\"140%\"><feDropShadow dx=\"0\" dy=\"2\" stdDeviation=\"3\" flood-color=\"#000\" flood-opacity=\".18\"/></filter>"
+        // Hovered leaf last so it sits on top of its neighbours.
+        let order = map.leaves.enumerated().sorted { ($0.element.item.id == hover ? 1 : 0) < ($1.element.item.id == hover ? 1 : 0) }
+        for (i, leaf) in order {
             let st = leaf.item.state, d = path(leaf.outline)
             let hovered = hover == leaf.item.id, dim = hover != nil && !hovered
-            s += "<g\(dim ? " opacity=\"\(LeafPalette.dimOthers)\"" : "")\(hovered ? " transform=\"translate(0,-1.5)\"" : "")>"
-            if hovered { s += "<path d=\"\(d)\" fill=\"#000\" fill-opacity=\".18\" transform=\"translate(0,3)\"/>" }
+            let c = leaf.centroid, k = LeafPalette.hoverScale
+            let lift = hovered ? " transform=\"translate(\(f(c.x * (1 - k))),\(f(c.y * (1 - k) - 1))) scale(\(k))\" filter=\"url(#ls)\"" : ""
+            s += "<g\(dim ? " opacity=\"\(LeafPalette.dimOthers)\"" : "")\(lift)>"
             s += "<clipPath id=\"L\(i)\"><path d=\"\(d)\"/></clipPath>"
             s += "<path d=\"\(d)\" fill=\"\(LeafPalette.fill(st))\"\(st == .stale ? " stroke=\"\(LeafPalette.staleStroke)\" stroke-width=\".4\"" : "")/>"
             if !leaf.inner.isEmpty {
@@ -125,18 +159,14 @@ public enum LeafSVG {
                 s += "<path d=\"M\(f(v.p0.x)),\(f(v.p0.y))Q\(f(v.c.x)),\(f(v.c.y)) \(f(v.p1.x)),\(f(v.p1.y))\" stroke=\"\(vc)\" stroke-opacity=\"\(f(vo * v.opacity))\" stroke-width=\"\(f(v.width))\" fill=\"none\" stroke-linecap=\"round\"/>"
             }
             s += "</g>"
-            if hovered { s += "<path d=\"\(d)\" fill=\"none\" stroke=\"\(LeafPalette.hoverStroke)\" stroke-width=\"1.6\"/>" }
-            let dark = LeafPalette.isDark(st)
-            let lc = dark ? LeafPalette.labelOnDark : "#1c1e21", sc = dark ? LeafPalette.sizeOnDark : LeafPalette.sizeOnLight
-            let lines = leaf.labelLines, y0 = leaf.centroid.y - Double(lines.count + (leaf.subLabel == nil ? 0 : 1)) * 12.5 / 2 + 2
-            for (k, line) in lines.enumerated() { s += text(leaf.centroid.x, y0 + Double(k) * 12.5 + 4, line, size: 10.5, color: lc, weight: 500) }
-            if leaf.showSize { s += text(leaf.centroid.x, lines.isEmpty ? leaf.centroid.y + 3 : y0 + Double(lines.count) * 12.5 + 4, sizeLabel(leaf.item), size: 10.5, color: sc) }
-            if let sub = leaf.subLabel { s += text(leaf.centroid.x, y0 + Double(lines.count + 1) * 12.5 + 4, sub, size: 10.5, color: sc, extra: " font-style=\"italic\"") }
+            if let name = leaf.labelLines.first {
+                let lc = LeafPalette.isDark(st) ? LeafPalette.labelOnDark : "#1c1e21"
+                s += text(c.x, c.y + 3.8, name, size: LeafText.leafSize, color: lc, weight: 500)
+            }
             s += "</g>"
         }
         for g in map.groupLabels {
-            let rot = g.vertical ? " transform=\"rotate(-90 \(f(g.at.x)) \(f(g.at.y)))\"" : ""
-            s += text(g.at.x, g.at.y, g.name, size: 10.5, color: LeafPalette.groupLabel, weight: 500, extra: rot)
+            s += text(g.at.x, g.at.y, g.name, size: LeafText.groupSize, color: LeafPalette.groupLabel, weight: 500)
         }
         return s
     }

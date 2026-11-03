@@ -22,3 +22,4 @@
 - #2 `v1-h8-leaves` (stacked on #1): H8 leaf map in the popover (D9) and the wilting menu bar leaf (D10). Layout in `Sources/ArboristCore/Leaves`; Linux snapshots in `project-context/shots/` via `scripts/render-shots.sh`.
 - #3 `scan-progressive`: progressive scan with repo-by-repo progress, bulk directory listing, cached last scan, timeout with Retry (D11).
 - #4 `worktree-first`: worktree-first leaf map, hover cards, machine-wide worktree discovery, fewer git calls (D12).
+- #5 `declutter`: decluttered map, eased hover, hover card hierarchy (D13); separate commit: app cleanup of safe worktrees (D14).

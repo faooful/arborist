@@ -28,18 +28,23 @@ public enum LeafPalette {
     /// Vein colour and alpha (0–1).
     public static func vein(_ s: LeafState) -> (String, Double) {
         switch s {
-        case .protected: ("#fbf8ef", 0x30 / 255.0)
-        case .stale: ("#7a603e", 0x48 / 255.0)
-        case .deps: ("#a7ae9a", 0x70 / 255.0)
-        default: ("#7f8a70", 0x48 / 255.0)
+        // Lighter than H8 (D13): veins are texture, not information.
+        case .protected: ("#fbf8ef", 0x1c / 255.0)
+        case .stale: ("#7a603e", 0x2a / 255.0)
+        case .deps: ("#a7ae9a", 0x44 / 255.0)
+        default: ("#7f8a70", 0x2a / 255.0)
         }
     }
     /// Rebuildable inner share (D12): a darker wash inside the leaf.
     public static let rebuildableShade = "#2f3a28"
-    public static func rebuildableOpacity(_ s: LeafState) -> Double { s == .protected ? 0.28 : 0.16 }
+    public static func rebuildableOpacity(_ s: LeafState) -> Double { s == .protected ? 0.15 : 0.085 }
     /// Hover: outline of the hovered leaf, and how much the others fade.
     public static let hoverStroke = "#2f3a28"
-    public static let dimOthers = 0.5
+    /// Other leaves fade to this while one is hovered (D13): a gentle fade toward the paper, no darkening.
+    public static let dimOthers = 0.88
+    /// Hovered leaf scale and the hover fade duration (D13).
+    public static let hoverScale = 1.03
+    public static let hoverFade = 0.18
     public static let cardFill = "#fffdf7"
     public static let cardStroke = "#d8d1bf"
     /// Status dot colour for a worktree status.
@@ -49,6 +54,15 @@ public enum LeafPalette {
         case .unpushed: "#7d8a6a"
         case .merged, .stale: "#b8976a"
         case .clean: "#b3bba5"
+        }
+    }
+
+    /// Text colour inside a state pill (on the dot colour at 20%).
+    public static func pillText(_ s: WorktreeStatus) -> String {
+        switch s {
+        case .uncommitted, .unpushed: "#3f4a32"
+        case .merged, .stale: "#7a5a32"
+        case .clean: "#5d6652"
         }
     }
 

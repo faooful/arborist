@@ -40,3 +40,12 @@
 - **Header** = "40 worktrees in 34 repos · 5 stale".
 - **JSON** keeps every old key and adds `lastCommitSubject`, `upstream`, `ahead`, `behind`, `uncommittedFiles`.
 
+**D13. Declutter, a calmer hover, and a hover card with hierarchy (Joseph: "the UI is getting cluttered and hard to read, plus the hover is very jarring").**
+- **Group labels** sit only on the top and bottom edges of the map. A label is kept only if its measured box lies inside the map and is at least 6 pt from every label already kept. Bigger groups go first, and losers are dropped rather than nudged. Rotated side labels are gone.
+- **Leaf text** is the branch name on one line at 10.5 pt, and only if the leaf is wide enough at the text's top, middle and baseline (`LeafText.fits`, with a slightly generous width estimate). Otherwise the leaf has no text. Sizes and the repo name are no longer on leaves; they are in the hover card.
+- **Every worktree keeps its own leaf.** Small and 0 B ones (prunable `/tmp` worktrees) are padded to a fixed minimum area of about 28×28 pt and never folded into "other".
+- **Quieter map.** The rebuildable inner shade is at about half its old opacity, veins are about 40% lighter, and the gutters are about 1 pt wider.
+- **Footer.** One legend line with three dots and "Caches 7.1 GB" at the right. The Worktree/Main checkout row is gone. The free bar is unchanged.
+- **Hover (app).** Changes ease in and out over 180 ms. Other leaves fade to 0.88 opacity with no darkening. The hovered leaf scales to 1.03 with a soft shadow. The card fades in and sits beside the leaf (right, left, below, then above) so it doesn't cover it. `HoverTracker` holds a leave for 120 ms, so crossing a gutter to a neighbour cross-fades and the card just moves. Pointing at the card keeps it open. With Reduce Motion there is no scale, lift or shadow, just a 100 ms opacity change.
+- **Hover card.** Header: the branch (semibold), a state pill coloured like its dot, the repo, and the path in small monospace, shortened in the middle, with the full path as a tooltip. Then a 2×2 grid: Size (with a rebuildable mini bar), Changes, Sync ("1 ahead · 766 behind") and Last commit ("6 months ago"). The commit message wraps at word boundaries to at most 2 lines. The footer has subtle Reveal in Finder and Copy remove command buttons. Type is 10–12 pt, with 10 pt padding.
+

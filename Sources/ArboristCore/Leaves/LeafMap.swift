@@ -68,8 +68,48 @@ public struct Leaf: Equatable, Sendable {
 
 public struct GroupLabel: Equatable, Sendable {
     public var name: String
+    /// Text anchor: horizontal centre, baseline.
     public var at: Pt
-    public var vertical: Bool
+    /// Always false since D13 (rotated side labels were removed); kept for source compatibility.
+    public var vertical: Bool = false
+    /// The box the text occupies, used for collision checks.
+    public var rect: Rect { let w = LeafText.width(name, size: LeafText.groupSize); return Rect(x: at.x - w / 2, y: at.y - 10, w: w, h: 13) }
+}
+
+public struct Rect: Equatable, Sendable {
+    public var x, y, w, h: Double
+    public init(x: Double, y: Double, w: Double, h: Double) { self.x = x; self.y = y; self.w = w; self.h = h }
+    public func intersects(_ o: Rect, gap: Double = 0) -> Bool {
+        x < o.x + o.w + gap && o.x < x + w + gap && y < o.y + o.h + gap && o.y < y + h + gap
+    }
+    public func inside(width: Double, height: Double) -> Bool { x >= 0 && y >= 0 && x + w <= width && y + h <= height }
+}
+
+/// Text measurement for fit checks (D13). An estimate of SF Pro/Inter advance widths, a little generous so
+/// "fits" is never optimistic.
+public enum LeafText {
+    /// Horizontal padding each side of a leaf label.
+    public static let pad = 5.0
+    /// True when `text` at `leafSize` fits inside the polygon centred on `c`.
+    public static func fits(_ text: String, in poly: [Pt], at c: Pt, size: Double = leafSize) -> Bool {
+        let w = width(text, size: size) + 2 * pad
+        return [-size * 0.55, 0, size * 0.45].allSatisfy { Geo.chord(poly, y: c.y + $0) >= w }
+    }
+    public static let leafSize = 10.5
+    public static let groupSize = 10.5
+    public static func width(_ s: String, size: Double, weight medium: Bool = true) -> Double {
+        var w = 0.0
+        for ch in s {
+            switch ch {
+            case "i", "l", "j", ".", ",", ":", ";", "'", "|", "!", "I": w += 0.30
+            case "f", "t", "r", "/", "-", "(", ")", " ": w += 0.38
+            case "m", "w", "M", "W": w += 0.88
+            case "A"..."Z", "_": w += 0.68
+            default: w += 0.57
+            }
+        }
+        return w * size * (medium ? 1.03 : 1.0)
+    }
 }
 
 public struct LeafMap: Equatable, Sendable {
@@ -157,7 +197,8 @@ public enum LeafLayout {
         let total = input.flatMap(\.items).reduce(0.0) { $0 + $1.weight }
         guard total > 0 else { return LeafMap(width: width, height: height, leaves: [], groupLabels: [], stipple: [], staleCount: staleCount ?? 0) }
         let minW = total * minLeaf * minLeaf / (width * height * 0.82)
-        let groups = fold(input, minWeight: minW).filter { !$0.items.isEmpty }
+        // Every worktree keeps its own leaf (D13): small and 0 B ones are padded to a fixed minimum, never folded.
+        let groups = pad(input, minWeight: minW).filter { !$0.items.isEmpty }
 
         // Organic outer boundary: a convex superellipse.
         let w = width - marginX, h = height
@@ -170,19 +211,17 @@ public enum LeafLayout {
         var rng = PowerTreemap.Rng(seed: seed)
         let groupCells = PowerTreemap.split(values: groups.map { $0.items.reduce(0.0) { $0 + $1.weight } }, clip: outer, rng: &rng)
 
-        var leaves: [Leaf] = [], labels: [GroupLabel] = [], stipple: [Pt] = []
+        var leaves: [Leaf] = [], stipple: [Pt] = [], candidates: [(Double, GroupLabel)] = []
         var cid = 0
         for (gi, g) in groups.enumerated() {
             let gpoly = groupCells[gi]
             guard gpoly.count >= 3 else { continue }
-            let gp = Geo.inset(gpoly, 2.6)
+            let gp = Geo.inset(gpoly, 3.4)
             guard gp.count >= 3 else { continue }
-            // Repo names label groups of two or more leaves along the map edge; single leaves carry it inside.
-            let edgeLabel = g.isFree ? nil : groupLabel(g.name, gp, height: height)
-            if g.items.count > 1, let l = edgeLabel { labels.append(l) }
+            if !g.isFree, let l = groupLabel(g.name, gp, height: height) { candidates.append((g.items.reduce(0.0) { $0 + $1.weight }, l)) }
             let cells = PowerTreemap.split(values: g.items.map(\.weight), clip: gpoly, rng: &rng)
             for (ii, item) in g.items.enumerated() {
-                var p = Geo.inset(cells[ii], 2.0)
+                var p = Geo.inset(cells[ii], 2.8)
                 guard p.count >= 3 else { continue }
                 p = Geo.clip(p, to: gp)
                 guard p.count >= 3 else { continue }
@@ -201,30 +240,46 @@ public enum LeafLayout {
                     continue
                 }
                 cid += 1
-                let leaf = shapeLeaf(item, group: g.name, cell: p, cid: cid, mapCentre: Pt(width / 2, height / 2))
-                // A lone leaf too small for its repo line gets the repo as an edge label instead.
-                if g.items.count == 1, leaf.subLabel == nil, let l = edgeLabel { labels.append(l) }
-                leaves.append(leaf)
+                leaves.append(shapeLeaf(item, group: g.name, cell: p, cid: cid, mapCentre: Pt(width / 2, height / 2)))
             }
         }
+        let labels = placeLabels(candidates, width: width, height: height)
         let stale = staleCount ?? groups.flatMap(\.items).reduce(0) { $0 + ($1.state == .stale ? max(1, $1.foldedCount) : 0) }
         return LeafMap(width: width, height: height, leaves: leaves, groupLabels: labels, stipple: stipple, staleCount: stale)
     }
 
     static func sgn(_ v: Double) -> Double { v < 0 ? -1 : (v > 0 ? 1 : 0) }
 
+    /// Candidate label for a group touching the top or bottom edge of the map (D13: no rotated side labels).
     static func groupLabel(_ name: String, _ gp: [Pt], height: Double) -> GroupLabel? {
         let ys = gp.map(\.y), mnY = ys.min()!, mxY = ys.max()!
-        let mnX = gp.map(\.x).min()!
         let top = mnY < 22, bottom = mxY > height - 22
-        if top || bottom {
-            let edge = top ? mnY : mxY
-            let pts = gp.filter { abs($0.y - edge) < 6 }
-            let x = pts.reduce(0) { $0 + $1.x } / Double(max(pts.count, 1))
-            return GroupLabel(name: name, at: Pt(x, top ? 10 : height - 3), vertical: false)
+        guard top || bottom else { return nil }
+        let edge = top ? mnY : mxY
+        let pts = gp.filter { abs($0.y - edge) < 6 }
+        let x = pts.reduce(0) { $0 + $1.x } / Double(max(pts.count, 1))
+        return GroupLabel(name: name, at: Pt(x, top ? 10 : height - 3))
+    }
+
+    /// Keeps a label only if it lies inside the map and clears every label already kept; bigger groups win (D13).
+    /// Labels that don't fit are dropped, never shifted onto a neighbour's leaves.
+    static func placeLabels(_ candidates: [(Double, GroupLabel)], width: Double, height: Double) -> [GroupLabel] {
+        var kept: [GroupLabel] = []
+        for (_, l) in candidates.sorted(by: { $0.0 != $1.0 ? $0.0 > $1.0 : $0.1.name < $1.1.name }) {
+            let r = l.rect
+            guard r.inside(width: width, height: height), !kept.contains(where: { $0.rect.intersects(r, gap: 6) }) else { continue }
+            kept.append(l)
         }
-        // Vertical only along the left edge; interior groups would stack labels on top of each other.
-        return mnX < 30 ? GroupLabel(name: name, at: Pt(7, (mnY + mxY) / 2), vertical: true) : nil
+        return kept.sorted { $0.at.x != $1.at.x ? $0.at.x < $1.at.x : $0.at.y < $1.at.y }
+    }
+
+    /// Pads every item to at least `minWeight` so each worktree, even a 0 B prunable one, gets a fixed minimum leaf.
+    public static func pad(_ groups: [LeafGroup], minWeight: Double) -> [LeafGroup] {
+        groups.map { g in
+            var g = g
+            g.items = g.items.map { var i = $0; i.weight = max(i.weight, minWeight); return i }
+            return g
+        }
     }
 
     // MARK: Leaf shaping (port of h8.js)
@@ -263,37 +318,16 @@ public enum LeafLayout {
         let outline = wavy(s, kind: kind, cid: cid).enumerated().filter { $0.offset % 2 == 0 }.map(\.element)
         let veins = makeVeins(kind: kind, a: a, dir: dir, perp: perp, lx: lx, half: half, shape: s, cid: cid)
 
-        // Label: wrap long names at - and /, like h8.js; fall back to size only, then nothing.
+        // Label (D13): the branch name on one line at 10.5 pt, only if the leaf is wide enough at the text's
+        // top, middle and bottom; otherwise no text. Sizes and the repo live in the hover card.
         let c = Geo.centroid(s)
         let name = item.foldedCount > 0 ? "other (\(item.foldedCount))" : item.name
-        var parts = [name]
-        if name.count > 9 {
-            parts = []
-            var cur = ""
-            for ch in name {
-                cur.append(ch)
-                if ch == "-" || ch == "/" {
-                    if let last = parts.last, (last + cur).count <= 10 { parts[parts.count - 1] = last + cur } else { parts.append(cur) }
-                    cur = ""
-                }
-            }
-            if !cur.isEmpty { if let last = parts.last, (last + cur).count <= 10 { parts[parts.count - 1] = last + cur } else { parts.append(cur) } }
-        }
-        let lw = Double(parts.map(\.count).max() ?? 0) * 6 + 6, lh = Double(parts.count) * 12.5, y0 = c.y - lh / 2 + 2
-        var fits = true
-        for k in 0...parts.count where Geo.chord(s, y: y0 + Double(k) * 12.5 - 4) < (k < parts.count ? lw : 30) { fits = false }
-        let chord = Geo.chord(s, y: c.y)
-        // Repo as a small second line, under the size, when the leaf is wide enough there.
-        var sub: String?
-        if fits, let repo = item.repo, item.foldedCount == 0 {
-            let yRepo = y0 + Double(parts.count + 1) * 12.5 + 4
-            if Geo.chord(s, y: yRepo - 4) > Double(repo.count) * 5.6 + 6 { sub = repo }
-        }
+        let fits = LeafText.fits(name, in: outline, at: c)
         // Rebuildable share: the outline scaled about its centroid so its area is that share of the leaf.
         let share = item.rebuildableShare
         let inner = share > 0.02 ? outline.map { c + ($0 - c) * share.squareRoot() } : []
         return Leaf(item: item, group: group, outline: outline, veins: veins, centroid: c,
-                    labelLines: fits ? parts : [], showSize: fits || chord > 26, inner: inner, subLabel: sub)
+                    labelLines: fits ? [name] : [], showSize: false, inner: inner, subLabel: nil)
     }
 
     static func wavy(_ s: [Pt], kind: LeafKind, cid: Int) -> [Pt] {
