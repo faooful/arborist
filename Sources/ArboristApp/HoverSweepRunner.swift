@@ -40,6 +40,7 @@ enum HoverSweepRunner {
         let model = AppModel(sweepWith: scan)
         precondition(model.cleanupDisabled, "sweep must run with cleanup disabled")
         if let f = requestedValue(for: "--filter") { model.applyFilterNames(f.split(separator: ",").map(String.init)) }
+        if let st = requestedValue(for: "--state"), !model.applyStateList(st) { FileHandle.standardError.write(Data("bad --state \(st)\n".utf8)); exit(2) }
         guard let map = model.leafMap, !map.leaves.isEmpty else { fail("no leaf map (empty scan or filter?)") }
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
 
@@ -112,6 +113,7 @@ enum HoverSweepRunner {
         let model = AppModel(sweepWith: scan)
         precondition(model.cleanupDisabled, "snapshot must run with cleanup disabled")
         if let f = requestedValue(for: "--filter") { model.applyFilterNames(f.split(separator: ",").map(String.init)) }
+        if let st = requestedValue(for: "--state"), !model.applyStateList(st) { FileHandle.standardError.write(Data("bad --state \(st)\n".utf8)); exit(2) }
         let total = scan.repos.count
         model.simulateCachedScanning(done: max(0, total - 2), total: total)
         let host = NSHostingView(rootView: PopoverView().environmentObject(model).environmentObject(model.hover))

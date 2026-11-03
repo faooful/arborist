@@ -8,8 +8,8 @@ USAGE:
   arborist scan [--json] [--root PATH ...] [--max-depth N]
   arborist free [--json]
   arborist config            print the config file path and contents
-  arborist render [--sample|--busy|--from SCAN.json] [--filter NAME[,NAME]] [--hover N|PATH] --out FILE.svg   worktree leaf map as SVG (N: leaf drawn hovered)
-  arborist render [--sample|--busy|--from SCAN.json] [--filter NAME[,NAME]] --hover-sweep DIR   hover sweep: frame-NNN.svg + frames.json
+  arborist render [--sample|--busy|--from SCAN.json] [--filter NAME[,NAME]] [--state ready|uncommitted|clean|stale[,..]] [--hover N|PATH] --out FILE.svg   worktree leaf map as SVG (N: leaf drawn hovered)
+  arborist render [--sample|--busy|--from SCAN.json] [--filter NAME[,NAME]] [--state S[,..]] --hover-sweep DIR   hover sweep: frame-NNN.svg + frames.json
   arborist render-stages --out FILE.svg        the four menu bar leaf stages as SVG
 
 Without --root, roots come from ~/.config/arborist/config.json (default: ~ and ~/Documents).
@@ -27,6 +27,7 @@ var hoverArg: String?
 var fromPath: String?
 var sweepDir: String?
 var filterNames: [String]?
+var stateArg: String?
 var i = 0
 while i < args.count {
     switch args[i] {
@@ -35,6 +36,7 @@ while i < args.count {
     case "--out" where i + 1 < args.count: outPath = args[i + 1]; i += 1
     case "--from" where i + 1 < args.count: fromPath = args[i + 1]; i += 1
     case "--hover" where i + 1 < args.count: hoverArg = args[i + 1]; i += 1
+    case "--state" where i + 1 < args.count: stateArg = args[i + 1]; i += 1
     case "--filter" where i + 1 < args.count: filterNames = args[i + 1].split(separator: ",").map(String.init); i += 1
     case "--hover-sweep" where i + 1 < args.count: sweepDir = args[i + 1]; i += 1
     case "--json", "--sample", "--busy": break
@@ -66,10 +68,19 @@ case "render":
     let unfiltered = try! fromPath.map { try ScanResult.decode(Data(contentsOf: URL(fileURLWithPath: $0))) }
         ?? (args.contains("--busy") ? LeafSample.busy : sample ? LeafSample.scan : Scanner(config: config).scan())
     // --filter name[,name]: only those repos (by name or path), like the header filter (D18).
-    let r = filterNames.map { RepoFilter.only(names: $0, among: unfiltered.repos).apply(unfiltered) } ?? unfiltered
-    if filterNames != nil && r.repos.isEmpty {
+    // --state ready|uncommitted|clean|stale[,..]: the legend's state filter, ANDed with --filter (D21).
+    let states = stateArg.map { a -> StateFilter in
+        guard let s = StateFilter.parse(a) else {
+            FileHandle.standardError.write("bad --state \(a); use ready|uncommitted|clean|stale[,..]\n".data(using: .utf8)!); exit(2)
+        }
+        return s
+    } ?? .all
+    let visible = VisibleSet(repos: filterNames.map { RepoFilter.only(names: $0, among: unfiltered.repos) } ?? .all, states: states)
+    let r = visible.apply(unfiltered)
+    if filterNames != nil && visible.repos.isEmpty(unfiltered.repos) {
         FileHandle.standardError.write("--filter matched no repos; available: \(unfiltered.repos.map(\.name).joined(separator: ", "))\n".data(using: .utf8)!); exit(2)
     }
+    if r.repos.isEmpty { FileHandle.standardError.write("nothing matches --filter/--state\n".data(using: .utf8)!); exit(2) }
     let map = LeafLayout.layout(LeafLayout.groups(from: r), staleCount: r.totals.staleWorktrees)
     // --hover N draws the Nth leaf hovered, with its card (for snapshots).
     // --hover N (leaf index) or --hover PATH (a worktree path).
