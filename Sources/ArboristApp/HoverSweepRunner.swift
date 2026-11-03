@@ -72,24 +72,42 @@ enum HoverSweepRunner {
         let path = HoverSweep.path(in: map)
         var frames: [HoverSweep.Frame] = []
         var t = 0.0, last = Pt(-1, -1)
-        for (i, p) in path.enumerated() {
+        // D20 reach path: simulated time (captures are slow), so the corridor's grace is judged per frame.
+        var simBase: Double?
+        func feed(_ p: Pt?, reachTarget: Bool) {
+            let i = frames.count, before = hover.tracker.cardOrigin
             if let p {
                 last = p
-                // A view point delivered the way mouseMoved delivers it: through the tracking view's callback.
                 let vp = transform.toView(p)
-                tracking.onMove(CGPoint(x: vp.x, y: vp.y))
+                if let b = simBase {
+                    hover.pointer(view: CGPoint(x: vp.x, y: vp.y), in: map, at: b + t, animated: false)
+                } else {
+                    // A view point delivered the way mouseMoved delivers it: through the tracking view's callback.
+                    tracking.onMove(CGPoint(x: vp.x, y: vp.y))
+                }
             } else {
+                simBase = nil
+                hover.exitCard(at: t)
                 hover.exit(at: t, animated: false)
                 hover.settle(at: t, animated: false)
             }
-            // Instant mode (D16): apply a pending clear right away, as if the grace had passed.
-            if let c = hover.tracker.clearAt { hover.settle(at: max(c, HoverModel.now()), animated: false) }
+            // Instant mode (D16, D20): apply a pending clear or leaf switch right away.
+            if let c = hover.tracker.nextDeadline { hover.settle(at: max(c, simBase.map { $0 + t } ?? HoverModel.now()), animated: false) }
             settle(host)
-            frames.append(HoverSweep.frame(i, pointer: p, last: last, t: t, tracker: hover.tracker, map: map, transform: transform))
+            frames.append(HoverSweep.frame(i, pointer: p, last: last, t: t, tracker: hover.tracker, map: map, transform: transform,
+                                           placedNow: hover.tracker.cardOrigin != before, reachTarget: reachTarget))
             let marker = p.map { tracking.convert(CGPoint(x: transform.toView($0).x, y: transform.toView($0).y), to: host) }
             capture(host, marker: marker, to: dir + String(format: "/frame-%03d.png", i))
             t += p == nil ? HoverTracker.leaveDelay + 0.01 : 1.0 / 30
         }
+        let leaveAt = path.firstIndex { $0 == nil } ?? path.count
+        for p in path[..<leaveAt] { feed(p, reachTarget: false) }
+        // D20: reach into the card and end on a button, then leave.
+        simBase = HoverModel.now() + 1 - t
+        if hover.tracker.card == nil, let l = map.leaves.first { feed(l.centroid, reachTarget: false) }
+        let reach = HoverSweep.reachPath(hover.tracker)
+        for (k, p) in reach.enumerated() { feed(p, reachTarget: k == reach.count - 1) }
+        for p in path[leaveAt...] { feed(p, reachTarget: false) }
         let report = HoverSweep.Report(frames)
         do { try HoverSweep.json(report).write(to: URL(fileURLWithPath: dir + "/frames.json")) } catch { fail("\(error)") }
         precondition(model.pendingCleanup == nil && model.cleanupResults == nil && !model.cleaning, "cleanup must not run")

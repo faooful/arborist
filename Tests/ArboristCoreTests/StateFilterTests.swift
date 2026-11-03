@@ -101,6 +101,7 @@ final class StateFilterTests: XCTestCase {
             XCTAssertEqual(r.mismatches, 0, r.summary)
             XCTAssertEqual(r.cardClipped, 0, r.summary)
             XCTAssertEqual(r.cardReachFailures, 0, r.summary)
+            XCTAssertEqual(r.buttonHits, 1, "D20: the reach path ends on a card button. " + r.summary)
             for f in r.frames { if let h = f.hovered { XCTAssertTrue(ready.contains(h), h) } }
             XCTAssertGreaterThan(r.hoveredCount, 0)
         }
