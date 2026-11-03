@@ -19,27 +19,27 @@ final class AppSurfaceTests: XCTestCase {
         let card = HoverCard(ref)
         _ = (card.branch, card.pill, card.status, card.repo, card.path, card.fullPath, card.size, card.rebuildableShare,
              card.rebuildable, card.changes, card.sync, card.lastCommit, card.message, card.removeCommand)
-        let size = Pt(LeafSVG.cardWidth, LeafSVG.cardHeight(card) + 26)
-        _ = LeafSVG.cardOrigin(avoiding: Rect(x: x0, y: y0, w: x1 - x0, h: y1 - y0), size: size, in: Pt(map.width, map.height))
         var tracker = HoverTracker()
         _ = tracker.pointer(leaf.item.id, at: 0); _ = tracker.settle(at: 1)
-        _ = (tracker.card, tracker.hovered, HoverTracker.leaveDelay, HoverTracker.duration(reduceMotion: true))
-        // D15: HoverModel / MouseTracking / the sweep runner.
-        tracker.cardSize = LeafSVG.cardSlot
-        _ = tracker.move(to: Pt(1, 1), in: map, at: 2); tracker.exit(at: 3); _ = tracker.click(at: Pt(1, 1), in: map); tracker.reset()
+        _ = (tracker.strip, tracker.hovered, tracker.clearAt, HoverTracker.leaveDelay, HoverTracker.duration(reduceMotion: true))
+        // D15/D22: HoverModel / MouseTracking / the sweep runner / the strip and tooltip.
+        tracker.tooltipSize = TooltipPlacement.size
+        _ = tracker.move(to: Pt(1, 1), in: map, at: 2); tracker.exit(at: 3); _ = tracker.click(at: Pt(1, 1), in: map); tracker.unpin(); tracker.reset()
         let v: HoverTracker.Visible = tracker.visible
-        _ = (v.hovered, v.card, v.cardOrigin, v.cardUnderPointer, v.pinned, tracker.cardOpacity, tracker.cardOrigin, tracker.cardRect, tracker.pinned)
-        _ = (LeafMap.hitRadius, map.hit(at: Pt(1, 1)), LeafSVG.appCardExtra)
+        _ = (v.hovered, v.pinned, v.strip, v.tooltipOrigin, tracker.tooltipOrigin, tracker.tooltipRect, tracker.pinned, tracker.appearance(of: "x").ring)
+        let tip = LeafTooltip(card)
+        _ = (tip.branch, tip.repo, tip.size, TooltipPlacement.size.x, TooltipPlacement.place(pointer: Pt(1, 1), in: Pt(480, 600)))
+        _ = (StripLayout.padding, StripLayout.row, StripLayout.buttons.indices, StripLayout.buttons[0].name, StripLayout.buttons[0].x, StripLayout.buttons[0].w)
+        _ = (PopoverLayout.stripHeight, PopoverLayout.stripGap, LeafPalette.ring, LeafPalette.ringHover, LeafPalette.ringPinned)
+        _ = (LeafMap.hitRadius, map.hit(at: Pt(1, 1)))
         let mt = MapTransform.fit(map, into: Pt(448, 400))
         _ = (MapTransform.usable(map, into: Pt(448, 400)), PopoverLayout.width, PopoverLayout.padding, PopoverLayout.mapWidth, PopoverLayout.mapHeight, PopoverLayout.minMapSide)
         _ = (mt.toView(Pt(1, 1)), mt.toMap(Pt(1, 1)), mt.scale, mt.dx, mt.dy, MapTransform.identity, map.hit(view: Pt(1, 1), mt))
-        let path = HoverSweep.path(in: map)
-        let frames = HoverSweep.run(map, path: path) { _, _ in }
+        let frames = HoverSweep.run(map)
         let rep = HoverSweep.Report(frames)
         _ = (rep.summary, rep.mismatches, rep.gapFrames, rep.hoveredCount, HoverSweep.json(rep),
-             HoverSweep.frame(0, pointer: nil, last: Pt(0, 0), t: 0, tracker: tracker, map: map, transform: mt))
-        _ = HoverSweep.json(frames + [HoverSweep.Frame(frame: 0, x: 0, y: 0, t: 0, hovered: nil, cardShown: false, cardX: nil, cardY: nil)])
-        _ = (LeafPalette.dimOthers, LeafPalette.hoverScale, LeafPalette.dot(ref.worktree.status), LeafPalette.pillText(ref.worktree.status),
+             HoverSweep.frame(0, pointer: nil, last: Pt(0, 0), t: 0, tracker: tracker, map: map, transform: mt, pinTruth: nil, reachTarget: false))
+        _ = (LeafPalette.dimOthers, LeafPalette.dot(ref.worktree.status), LeafPalette.pillText(ref.worktree.status),
              LeafPalette.rebuildableOpacity(leaf.item.state), LeafPalette.rebuildableShade, LeafPalette.cardFill, LeafPalette.cardStroke,
              LeafPalette.barFill, LeafPalette.barTrack, LeafPalette.groupLabel, LeafPalette.staleStroke, LeafPalette.fill(.stale),
              LeafText.leafSize, LeafText.groupSize)
@@ -62,14 +62,34 @@ final class AppSurfaceTests: XCTestCase {
         let vs = VisibleSet(repos: f, states: st)
         _ = (vs.apply(result), vs.count(.ready, in: result), vs.nothingMatches(result), VisibleSet.atLaunch(), vs.repos, vs.states)
         _ = (Cleanup.plan(result, visible: vs), CleanupSafety.isReady(ref.worktree), CleanupSafety.blocker(ref.worktree), StateKey.colour(ref.worktree))
-        _ = CardPlacement.place(leaf: Rect(x: 0, y: 0, w: 1, h: 1), size: LeafSVG.cardSlot, in: Pt(480, 560), current: nil, pointer: Pt(0, 0))
-        // D19: the card above the popover.
-        var sp = CardSpace(mapOrigin: Pt(16, 52), size: Pt(480, 560), transform: mt)
+        // D22: the popover space, the sweep steps and the action seam.
+        var sp = PopoverSpace(mapOrigin: Pt(16, 52), size: Pt(480, 600), transform: mt)
         sp.mapOrigin = Pt(0, 0); sp.size = Pt(1, 1); sp.transform = .identity
-        _ = (sp.toPopover(Pt(1, 1)), sp.leafRect(leaf), sp.clips(Rect(x: 0, y: 0, w: 1, h: 1)), LeafSVG.cardSpace(map), LeafSVG.svgSize(map))
-        _ = (CardPlacement.place(leaf: Rect(x: 0, y: 0, w: 1, h: 1), size: LeafSVG.cardSlot, in: Pt(480, 560), current: nil),
-             CardPlacement.margin, CardPlacement.gap)
+        _ = (sp.toPopover(Pt(1, 1)), sp.toMap(Pt(1, 1)), sp.stripRect, sp.clips(Rect(x: 0, y: 0, w: 1, h: 1)), LeafSVG.popoverSpace(map), LeafSVG.svgSize(map))
         tracker.space = sp; _ = tracker.space
-        _ = (rep.cardClipped, rep.cardReachFailures, HoverSweep.run(map, path: path, transform: mt, space: sp) { _, _ in }.first.map { ($0.cardRect, $0.cardClipped) })
+        let (steps, pin) = HoverSweep.steps(map, space: sp)
+        for s in steps { switch s { case .move(let p), .click(let p): _ = (p, HoverSweep.onMap(p, map)); case .leave: break } }
+        _ = (pin, rep.stripMismatches, rep.tooltipClipped, rep.reachFailures, rep.buttonHits)
+        _ = (PopoverAction.allCases, PopoverActionOutcome.fired(.list).log, SettingsOpening.steps(osMajor: 14),
+             SettingsOpening.shouldBecomeAccessory(otherVisibleWindows: 0))
+        for st in SettingsOpening.steps(osMajor: 13) {
+            switch st { case .becomeRegular, .activate, .openSettingsAction, .showSettingsSelector, .orderFront, .fallbackWindow: break }
+        }
+    }
+}
+
+@MainActor
+final class SurfaceEffects: PopoverActionEffects {
+    var isScanning = false
+    func openSettings(_ steps: [SettingsOpening.Step]) {}
+    func terminate() {}
+    func rescan() {}
+    func toggleList() {}
+}
+
+final class AppActionSurfaceTests: XCTestCase {
+    @MainActor func testRouterIsPublic() async {
+        let r = PopoverActionRouter(effects: SurfaceEffects(), dryRunQuit: true, osMajor: 14)
+        _ = (r.dryRunQuit, r.osMajor, r.isEnabled(.rescan), r.perform(.list))
     }
 }

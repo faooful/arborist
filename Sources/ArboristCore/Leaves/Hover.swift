@@ -222,6 +222,18 @@ public enum HoverSweep {
         }
 
         /// What should be hovered once the grace has passed (D16): the leaf under the pointer, else the snap.
+        /// Writes every field, nil as null, so frames.json shows when nothing is hovered (D15).
+        public func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(frame, forKey: .frame); try c.encode(x, forKey: .x); try c.encode(y, forKey: .y)
+            try c.encode(viewX, forKey: .viewX); try c.encode(viewY, forKey: .viewY); try c.encode(t, forKey: .t)
+            try c.encode(hovered, forKey: .hovered); try c.encode(pinned, forKey: .pinned); try c.encode(strip, forKey: .strip)
+            try c.encode(underPointer, forKey: .underPointer); try c.encode(inGap, forKey: .inGap)
+            try c.encode(snappedTo, forKey: .snappedTo); try c.encode(pinTruth, forKey: .pinTruth)
+            try c.encode(tooltipRect, forKey: .tooltipRect); try c.encode(tooltipClipped, forKey: .tooltipClipped)
+            try c.encode(buttonUnderPointer, forKey: .buttonUnderPointer); try c.encode(reachTarget, forKey: .reachTarget)
+        }
+
         public var expected: String? { underPointer ?? snappedTo }
         public var isMismatch: Bool { expected != hovered }
         /// What the strip should show: the pinned leaf, else the expected hover.
@@ -337,8 +349,8 @@ public enum HoverSweep {
     }
 
     /// The whole sweep: the serpentine, then (with a space) pin + reach, then leave.
-    public static func steps(_ map: LeafMap, space: PopoverSpace?) -> (steps: [Step], pinned: String?) {
-        let serp = path(in: map)
+    public static func steps(_ map: LeafMap, space: PopoverSpace?, rows: Int = 3, perRow: Int = 16) -> (steps: [Step], pinned: String?) {
+        let serp = path(in: map, rows: rows, perRow: perRow)
         var out: [Step] = serp.compactMap { $0 }.map { .move($0) }
         var pinned: String?
         if let s = space, let r = pinAndReach(map, space: s) { out += r.steps; pinned = r.leaf }
@@ -352,10 +364,10 @@ public enum HoverSweep {
 
     /// Runs the sweep through a tracker, the way the CLI does. `apply` sees the tracker and pointer after each step.
     public static func run(_ map: LeafMap, step: Double = 1.0 / 30, transform: MapTransform = .identity,
-                           space: PopoverSpace? = nil, apply: (Int, HoverTracker, Pt?) -> Void = { _, _, _ in }) -> [Frame] {
+                           space: PopoverSpace? = nil, rows: Int = 3, perRow: Int = 16, apply: (Int, HoverTracker, Pt?) -> Void = { _, _, _ in }) -> [Frame] {
         var tracker = HoverTracker()
         tracker.space = space
-        let (steps, pinLeaf) = steps(map, space: space)
+        let (steps, pinLeaf) = steps(map, space: space, rows: rows, perRow: perRow)
         let reachAt = space == nil ? nil : steps.lastIndex { if case .move = $0 { return true }; return false }
         var frames: [Frame] = []
         var t = 0.0, last = Pt(-1, -1), pinTruth: String?

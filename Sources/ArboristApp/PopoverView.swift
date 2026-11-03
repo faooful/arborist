@@ -7,7 +7,6 @@ import SwiftUI
 /// The whole app: a 480pt popover under the menu bar item. Worktree-first leaves (D9, D12).
 struct PopoverView: View {
     @EnvironmentObject var model: AppModel
-    @State private var showList = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -29,7 +28,7 @@ struct PopoverView: View {
                     Text(err + (model.result != nil ? " Showing the last results." : ""))
                         .font(.system(size: 11)).foregroundColor(Theme.ink)
                     Spacer()
-                    Button("Retry") { model.rescan() }.font(.system(size: 11))
+                    Button("Retry") { model.router.perform(.rescan) }.buttonStyle(HoverButtonStyle(kind: .link))
                 }
                 .padding(8)
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color(hex: LeafPalette.fill(.stale)).opacity(0.35)))
@@ -43,7 +42,7 @@ struct PopoverView: View {
                 VStack(spacing: 8) {
                     Text("Nothing matches").font(.system(size: 12)).foregroundColor(Theme.ink2)
                     Button("Show all") { withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) { model.setStates(.all) } }
-                        .buttonStyle(.borderless).font(.system(size: 11))
+                        .buttonStyle(HoverButtonStyle(kind: .link))
                 }
                 .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.mapHeight) // same box (D17, D21)
                 .transition(.opacity)
@@ -56,37 +55,58 @@ struct PopoverView: View {
                     .font(.system(size: 11)).foregroundColor(Theme.ink2)
                     .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.mapHeight) // same layout in every state (D17)
             }
+            // D22: the detail strip, docked below the map, the same fixed size in every state.
+            if let r = model.result, model.leafMap != nil, !model.filterHidesEverything, !model.nothingMatches {
+                DetailStrip(result: r)
+            } else {
+                Color.clear.frame(width: PopoverLayout.mapWidth, height: PopoverLayout.stripHeight)
+            }
             HStack { Key(); Spacer(minLength: 4); Text(model.result.flatMap { Format.cachesTotal($0.caches) } ?? "").font(.system(size: 11)).foregroundColor(Theme.ink2).lineLimit(1).layoutPriority(-1) }
             FreeBar(free: model.freeBytes ?? 0, total: model.result?.volume?.totalBytes ?? 0)
             HStack(spacing: 8) {
                 let n = model.clearPlan.count
                 Button(model.cleaning ? "Clearing…" : "Clear \(n)") { model.requestClear() }
-                    .buttonStyle(DarkButtonStyle())
+                    .buttonStyle(HoverButtonStyle(kind: .dark))
                     .disabled(n == 0 || model.cleaning)
                     .help("Removes \(n) merged or upstream-gone worktrees with nothing uncommitted or unpushed. Asks first; branches are kept.")
-                Button(model.scanning ? "Scanning…" : "Rescan") { model.rescan() }.disabled(model.scanning)
-                Button(showList ? "Hide list" : "List") { showList.toggle() }
+                // D22: Rescan, List, Settings and Quit go through the action router.
+                Button(model.scanning ? "Scanning…" : "Rescan") { model.router.perform(.rescan) }
+                    .buttonStyle(HoverButtonStyle(kind: .link))
+                    .disabled(!model.router.isEnabled(.rescan))
+                    .help("Scan every folder again, ignoring the cache")
+                Button(model.showList ? "Hide list" : "List") { model.router.perform(.list) }
+                    .buttonStyle(HoverButtonStyle(kind: .link))
                 Spacer()
-                Button("Settings…") {
-                    NSApp.activate(ignoringOtherApps: true)
-                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-                }
-                Button("Quit") { NSApp.terminate(nil) }
+                Button { model.router.perform(.settings) } label: { Image(systemName: "gearshape").font(.system(size: 13)) }
+                    .buttonStyle(HoverButtonStyle(kind: .icon))
+                    .help("Settings")
+                    .accessibilityLabel("Settings")
+                Button { model.router.perform(.quit) } label: { Image(systemName: "power").font(.system(size: 13)) }
+                    .buttonStyle(HoverButtonStyle(kind: .icon))
+                    .help("Quit Arborist")
+                    .accessibilityLabel("Quit Arborist")
             }
-            .buttonStyle(.borderless)
             .font(.system(size: 11))
             .foregroundColor(Theme.ink2)
-            if showList, let r = model.result { Checklist(result: r).frame(maxHeight: 260) }
+            if model.showList, let r = model.result { Checklist(result: r).frame(maxHeight: 260) }
             if let results = model.cleanupResults { CleanupResultsView(results: results) }
         }
         .padding(PopoverLayout.padding)
         .frame(width: PopoverLayout.width)
         .fixedSize(horizontal: false, vertical: true) // height = the content's ideal height, never squeezed
         .background(Theme.paper)
-        .coordinateSpace(name: PopoverSpace.name)
-        // D19: the card sits above everything, placed against the whole popover, so nothing clips it.
+        .coordinateSpace(name: PopoverCoords.name)
+        // D22: the tooltip sits above everything, placed against the whole popover; it never takes hit-testing.
         .overlay(alignment: .topLeading) {
-            if let r = model.result, !model.filterHidesEverything, !model.nothingMatches { HoverCardOverlay(result: r) }
+            if let r = model.result, !model.filterHidesEverything, !model.nothingMatches { TooltipOverlay(result: r) }
+        }
+        // Esc unpins (D22). A hidden cancel button, since the map itself rarely has key focus in the popover.
+        .background {
+            Button("") { model.hover.unpin() }.keyboardShortcut(.cancelAction).opacity(0).allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+        .background {
+            if #available(macOS 14.0, *) { SettingsActionBridge() }
         }
         .background(GeometryReader { g in
             Color.clear.onAppear { model.hover.popoverSize = Pt(g.size.width, g.size.height) }
@@ -128,12 +148,12 @@ struct Key: View {
                     .opacity(s.isAll || s.isActive(k) ? 1 : 0.45)
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(HoverButtonStyle(kind: .link, height: nil))
                 .help(k == .ready ? "Exactly what Clear would remove. ⌥-click: only this." : "\(k.title). Click to toggle, ⌥-click: only this.")
                 .accessibilityLabel("\(k.title)\(k == .ready ? ", \(readyCount)" : ""), \(s.isActive(k) ? "shown" : "hidden")")
             }
             if !s.isAll {
-                Button("Show all") { set(.all) }.buttonStyle(.borderless)
+                Button("Show all") { set(.all) }.buttonStyle(HoverButtonStyle(kind: .link, height: nil))
             }
         }
         .font(.system(size: 11)).foregroundColor(Theme.ink2)
@@ -183,26 +203,6 @@ struct FreeBar: View {
                 Text("of \(Format.bytes(total))").foregroundColor(Theme.ink2)
             }.font(.system(size: 11))
         }
-    }
-}
-
-struct DarkButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 12, weight: .medium))
-            .padding(.horizontal, 14).frame(height: 28)
-            .background(RoundedRectangle(cornerRadius: 7).fill(Color(hex: LeafPalette.button).opacity(configuration.isPressed ? 0.8 : 1)))
-            .foregroundColor(Color(hex: LeafPalette.labelOnDark))
-    }
-}
-
-struct PlainPillStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .padding(.horizontal, 16).padding(.vertical, 7)
-            .background(Capsule().fill(configuration.isPressed ? Theme.line : Color.white.opacity(0.6)))
-            .overlay(Capsule().stroke(Theme.ink.opacity(0.7), lineWidth: 1))
-            .foregroundColor(Theme.ink)
     }
 }
 
@@ -269,10 +269,12 @@ struct RemoveButton: View {
     @EnvironmentObject var model: AppModel
     let ref: WorktreeRef
     var title = "Remove worktree"
+    /// The strip has a fixed-width button (D22): the reason goes in the tooltip only.
+    var showReason = true
 
     var body: some View {
         let blocker = Cleanup.blocker(ref.worktree)
-        Button(blocker.map { "\(title) — \($0.reason)" } ?? title) { model.requestRemove(ref) }
+        Button(showReason ? (blocker.map { "\(title) — \($0.reason)" } ?? title) : title) { model.requestRemove(ref) }
             .disabled(blocker != nil || model.cleaning || model.cleanupDisabled)
             .help(blocker?.reason ?? "Runs `git worktree remove` (no --force) after you confirm. The branch is kept.")
     }
@@ -338,7 +340,7 @@ struct CleanupResultsView: View {
             HStack {
                 Text("Freed \(Format.bytes(freed))").font(.system(size: 11.5, weight: .medium))
                 Spacer()
-                Button("Done") { model.cleanupResults = nil }.buttonStyle(.borderless)
+                Button("Done") { model.cleanupResults = nil }.buttonStyle(HoverButtonStyle(kind: .link))
             }
             ForEach(Array(results.enumerated()), id: \.offset) { _, o in
                 Text(o.summary).font(.system(size: 10.5)).foregroundColor(Theme.ink2).lineLimit(1)
@@ -373,7 +375,7 @@ struct RepoFilterButton: View {
             .font(.system(size: 11.5)).foregroundColor(Theme.ink2)
             .frame(maxWidth: 140, alignment: .leading)
         }
-        .buttonStyle(.borderless)
+        .buttonStyle(HoverButtonStyle(kind: .link))
         .accessibilityLabel("Repo filter: \(model.filter.label(repos))")
         .popover(isPresented: $open, arrowEdge: .bottom) { menu }
     }
@@ -390,7 +392,7 @@ struct RepoFilterButton: View {
                 Spacer()
                 Text("⌥-click: only").font(.system(size: 10)).foregroundColor(Theme.ink2)
             }
-            .buttonStyle(.borderless).font(.system(size: 11))
+            .buttonStyle(HoverButtonStyle(kind: .link)).font(.system(size: 11))
             if repos.count > RepoFilter.searchThreshold {
                 TextField("Search repos", text: $query).textFieldStyle(.roundedBorder).font(.system(size: 11))
             }
@@ -413,7 +415,7 @@ struct RepoFilterButton: View {
                             .font(.system(size: 11.5))
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.borderless)
+                        .buttonStyle(HoverButtonStyle(kind: .link, height: nil))
                         .help(repo.path)
                         .accessibilityLabel("\(repo.name), \(repo.worktrees.count) worktrees, \(model.filter.includes(repo) ? "shown" : "hidden")")
                     }
