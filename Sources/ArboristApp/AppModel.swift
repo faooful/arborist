@@ -24,7 +24,21 @@ final class AppModel: ObservableObject {
     private var scanID = 0
     private var layoutPending = false
 
+    /// Shared hover state (D15), injected as its own environment object.
+    let hover = HoverModel()
+    /// True in the `--hover-sweep` test hook: every cleanup entry point refuses to run (D15).
+    let cleanupDisabled: Bool
+
+    /// Test hook (DEBUG only): one scan or the cache, no timers, no notifications, cleanup disabled.
+    init(sweepWith result: ScanResult) {
+        cleanupDisabled = true
+        self.result = result
+        freeBytes = result.volume?.freeBytes
+        relayout()
+    }
+
     init() {
+        cleanupDisabled = false
         refreshFree()
         // Draw the last scan straight away, marked as cached, then refresh in the background (D11).
         if let cached = ScanCache.load() {
@@ -54,7 +68,7 @@ final class AppModel: ObservableObject {
     // MARK: Cleanup (D14). Only reachable from a click in this UI, and always through the confirm sheet.
 
     /// Worktrees "Clear N" would remove or prune: merged or upstream gone, and nothing uncommitted, unpushed or locked.
-    var clearPlan: [CleanupItem] { result.map(Cleanup.plan) ?? [] }
+    var clearPlan: [CleanupItem] { cleanupDisabled ? [] : (result.map(Cleanup.plan) ?? []) }
     /// Set to show the confirm sheet. Nothing runs until the sheet's Remove button is clicked.
     @Published var pendingCleanup: [CleanupItem]?
     /// What happened in the last run, shown until dismissed.
@@ -62,15 +76,18 @@ final class AppModel: ObservableObject {
     @Published private(set) var cleaning = false
 
     func requestClear() {
+        guard !cleanupDisabled else { assertionFailure("cleanup is disabled in this mode"); return }
         let plan = clearPlan
         if !plan.isEmpty { pendingCleanup = plan }
     }
     func requestRemove(_ ref: WorktreeRef) {
+        guard !cleanupDisabled else { assertionFailure("cleanup is disabled in this mode"); return }
         if let item = Cleanup.item(ref) { pendingCleanup = [item] }
     }
     /// Called only by the confirm sheet. Each item is re-checked inside `Cleanup.execute` just before it runs.
     func confirmCleanup(_ items: [CleanupItem]) {
         pendingCleanup = nil
+        precondition(!cleanupDisabled, "cleanup is disabled in this mode")
         guard !cleaning, !items.isEmpty else { return }
         cleaning = true
         Task.detached(priority: .userInitiated) {

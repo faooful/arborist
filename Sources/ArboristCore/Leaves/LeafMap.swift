@@ -82,6 +82,7 @@ public struct Rect: Equatable, Sendable {
     public func intersects(_ o: Rect, gap: Double = 0) -> Bool {
         x < o.x + o.w + gap && o.x < x + w + gap && y < o.y + o.h + gap && o.y < y + h + gap
     }
+    public func contains(_ p: Pt) -> Bool { p.x >= x && p.x <= x + w && p.y >= y && p.y <= y + h }
     public func inside(width: Double, height: Double) -> Bool { x >= 0 && y >= 0 && x + w <= width && y + h <= height }
 }
 
@@ -120,6 +121,22 @@ public struct LeafMap: Equatable, Sendable {
     public var staleCount: Int
 
     public func leaf(at p: Pt) -> Leaf? { leaves.first { Geo.inside($0.outline, p) } }
+
+    /// Gutters and wavy edges are at most a few points wide; within this distance of a leaf edge a point
+    /// still resolves to that leaf (D15).
+    public static let hitRadius = 10.0
+
+    /// Hover hit-test (D15): the leaf under `p`, else the leaf whose edge is nearest within `radius`, else nil.
+    /// Uses the layout outlines only, so the lifted (scaled) drawing never changes what is hit.
+    public func hit(at p: Pt, radius: Double = LeafMap.hitRadius) -> Leaf? {
+        if let l = leaf(at: p) { return l }
+        var best: (Leaf, Double)?
+        for l in leaves {
+            let d = Geo.distance(p, toOutline: l.outline)
+            if d <= radius, d < (best?.1 ?? .infinity) { best = (l, d) }
+        }
+        return best?.0
+    }
 }
 
 public enum LeafLayout {

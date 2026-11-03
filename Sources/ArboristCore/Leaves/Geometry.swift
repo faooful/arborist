@@ -123,6 +123,19 @@ public enum Geo {
         return o
     }
 
+    /// Shortest distance from `q` to the polygon's edges.
+    public static func distance(_ q: Pt, toOutline p: [Pt]) -> Double {
+        guard !p.isEmpty else { return .infinity }
+        var best = Double.infinity
+        for i in p.indices {
+            let a = p[i], b = p[(i + 1) % p.count]
+            let dx = b.x - a.x, dy = b.y - a.y, len = dx * dx + dy * dy
+            let t = len > 0 ? max(0, min(1, ((q.x - a.x) * dx + (q.y - a.y) * dy) / len)) : 0
+            best = min(best, hypot(q.x - (a.x + t * dx), q.y - (a.y + t * dy)))
+        }
+        return best
+    }
+
     public static func bbox(_ p: [Pt]) -> (Double, Double, Double, Double) {
         (p.map(\.x).min() ?? 0, p.map(\.y).min() ?? 0, p.map(\.x).max() ?? 0, p.map(\.y).max() ?? 0)
     }

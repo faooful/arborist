@@ -7,7 +7,6 @@ import SwiftUI
 /// The whole app: a 480pt popover under the menu bar item. Worktree-first leaves (D9, D12).
 struct PopoverView: View {
     @EnvironmentObject var model: AppModel
-    @State private var hovered: String?
     @State private var showList = false
 
     var body: some View {
@@ -32,7 +31,7 @@ struct PopoverView: View {
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color(hex: LeafPalette.fill(.stale)).opacity(0.35)))
             }
             if let map = model.leafMap, let r = model.result {
-                LeafMapView(map: map, result: r, hovered: $hovered)
+                LeafMapView(map: map, result: r)
             } else {
                 Text(model.scanning ? "Looking for repositories and worktrees…" : (model.scanError == nil ? "No scan yet" : "No results"))
                     .font(.system(size: 11)).foregroundColor(Theme.ink2).frame(width: 448, height: 120)
@@ -57,7 +56,7 @@ struct PopoverView: View {
             .buttonStyle(.borderless)
             .font(.system(size: 11))
             .foregroundColor(Theme.ink2)
-            if showList, let r = model.result { Checklist(result: r, hovered: $hovered).frame(maxHeight: 260) }
+            if showList, let r = model.result { Checklist(result: r).frame(maxHeight: 260) }
             if let results = model.cleanupResults { CleanupResultsView(results: results) }
         }
         .padding(16)
@@ -137,17 +136,18 @@ struct PlainPillStyle: ButtonStyle {
 struct Checklist: View {
     @EnvironmentObject var model: AppModel
     let result: ScanResult
-    @Binding var hovered: String?
+    @EnvironmentObject var hover: HoverModel
 
     var body: some View {
-        ScrollViewReader { proxy in
+        let hovered = hover.hovered
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(WorktreeList.sorted(result), id: \.worktree.path) { ref in
                         WorktreeRow(ref: ref, highlighted: hovered == ref.worktree.path)
                             .id(ref.worktree.path)
                             .onHover { inside in
-                                if inside { hovered = ref.worktree.path } else if hovered == ref.worktree.path { hovered = nil }
+                                if inside { hover.row(ref.worktree.path) } else if hover.hovered == ref.worktree.path { hover.row(nil) }
                             }
                     }
                 }
@@ -198,7 +198,7 @@ struct RemoveButton: View {
     var body: some View {
         let blocker = Cleanup.blocker(ref.worktree)
         Button(blocker.map { "\(title) — \($0.reason)" } ?? title) { model.requestRemove(ref) }
-            .disabled(blocker != nil || model.cleaning)
+            .disabled(blocker != nil || model.cleaning || model.cleanupDisabled)
             .help(blocker?.reason ?? "Runs `git worktree remove` (no --force) after you confirm. The branch is kept.")
     }
 }

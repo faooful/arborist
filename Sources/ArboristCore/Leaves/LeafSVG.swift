@@ -17,7 +17,8 @@ public enum LeafSVG {
 
     /// The popover as an SVG (worktree-first, D12): headline, map, caches line, key, free bar and Clear.
     /// `hover` is a leaf id to draw in its hovered state, with its card.
-    public static func popover(_ r: ScanResult, map: LeafMap, note: String = "Linux render", hover: String? = nil, now: Date = Date()) -> String {
+    public static func popover(_ r: ScanResult, map: LeafMap, note: String = "Linux render", hover: String? = nil, now: Date = Date(),
+                               cardAt: Pt? = nil, pointer: Pt? = nil, cardOpacity: Double = 1) -> String {
         let freeBytes = r.volume?.freeBytes ?? 0, totalBytes = r.volume?.totalBytes ?? 0
         let pad = 16.0, w = map.width + pad * 2, mapTop = 52.0
         let keyTop = mapTop + map.height + 12
@@ -53,8 +54,13 @@ public enum LeafSVG {
         if let id = hover, let leaf = map.leaves.first(where: { $0.item.id == id }), let ref = WorktreeList.find(r, path: id) {
             let (x0, y0, x1, y1) = Geo.bbox(leaf.outline)
             let card = HoverCard(ref, now: now, home: LeafSample.home)
-            let o = cardOrigin(avoiding: Rect(x: x0, y: y0, w: x1 - x0, h: y1 - y0), size: Pt(cardWidth, cardHeight(card)), in: Pt(map.width, map.height))
-            s += hoverCard(card, at: o + Pt(pad, mapTop))
+            let o = cardAt ?? cardOrigin(avoiding: Rect(x: x0, y: y0, w: x1 - x0, h: y1 - y0), size: Pt(cardWidth, cardHeight(card)), in: Pt(map.width, map.height))
+            s += cardOpacity < 1 ? "<g opacity=\"\(cardOpacity)\">" + hoverCard(card, at: o + Pt(pad, mapTop)) + "</g>"
+                                 : hoverCard(card, at: o + Pt(pad, mapTop))
+        }
+        // --hover-sweep frames mark the pointer (D15).
+        if let p = pointer {
+            s += "<circle cx=\"\(f(p.x + pad))\" cy=\"\(f(p.y + mapTop))\" r=\"3.5\" fill=\"#d0402b\" stroke=\"#fff\" stroke-width=\"1\"/>"
         }
         return s + "</svg>"
     }
@@ -64,6 +70,11 @@ public enum LeafSVG {
     public static func cardHeight(_ c: HoverCard) -> Double {
         128 + Double(c.message.count) * 14 + (c.message.isEmpty ? 0 : 4) + 8 + 22 + 10
     }
+    /// The app's card adds a "Remove worktree" row (D14).
+    public static let appCardExtra = 26.0
+    /// Tallest card (2 message lines, app row). Hover anchors the card using this so it never needs to move
+    /// because one card is taller than the last (D15).
+    public static let cardSlot = Pt(cardWidth, 200.0 + appCardExtra) // cardHeight with 2 message lines = 200
 
     /// Places the card beside the hovered leaf without covering it: right, left, below, then above.
     /// If none fits inside `bounds`, the one overlapping the leaf least (clamped to bounds) wins.
