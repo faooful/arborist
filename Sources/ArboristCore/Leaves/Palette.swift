@@ -40,11 +40,13 @@ public enum LeafPalette {
     public static func rebuildableOpacity(_ s: LeafState) -> Double { s == .protected ? 0.15 : 0.085 }
     /// Hover: outline of the hovered leaf, and how much the others fade.
     public static let hoverStroke = "#2f3a28"
-    /// Other leaves fade to this while one is hovered (D13): a gentle fade toward the paper, no darkening.
-    public static let dimOthers = 0.88
-    /// Hovered leaf scale and the hover fade duration (D13).
-    public static let hoverScale = 1.03
-    public static let hoverFade = 0.18
+    /// Other leaves fade only slightly while one is hovered or pinned (D22).
+    public static let dimOthers = 0.92
+    /// D22: the ring on the hovered (2 pt) and pinned (stronger) leaf, and the strip's accent: one colour.
+    public static let ring = "#1f2a1a"
+    public static let ringHover = 2.0
+    public static let ringPinned = 3.5
+    public static let hoverFade = 0.15
     public static let cardFill = "#fffdf7"
     public static let cardStroke = "#d8d1bf"
     /// Status dot colour for a worktree status.
