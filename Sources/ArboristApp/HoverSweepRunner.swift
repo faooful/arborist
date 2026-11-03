@@ -39,7 +39,8 @@ enum HoverSweepRunner {
         let scan = ScanCache.load() ?? Scanner(config: ArboristConfig.load()).scan()
         let model = AppModel(sweepWith: scan)
         precondition(model.cleanupDisabled, "sweep must run with cleanup disabled")
-        guard let map = model.leafMap else { fail("no leaf map (empty scan?)") }
+        if let f = requestedValue(for: "--filter") { model.applyFilterNames(f.split(separator: ",").map(String.init)) }
+        guard let map = model.leafMap, !map.leaves.isEmpty else { fail("no leaf map (empty scan or filter?)") }
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
 
         let hover = model.hover
@@ -60,7 +61,12 @@ enum HoverSweepRunner {
         // map's frame, and LeafMapView has published the transform it draws with.
         guard let tracking = findTracking(in: host) else { fail("map tracking view not found") }
         let transform = hover.transform
-        print("map view frame in popover: \(tracking.convert(tracking.bounds, to: host)), transform: \(transform)")
+        let mapFrame = tracking.convert(tracking.bounds, to: host)
+        print("map view frame in popover: \(mapFrame), transform: \(transform)")
+        // D19: the card is placed and checked against the real popover (AppKit's layout, not a guess).
+        let y0 = host.isFlipped ? mapFrame.minY : host.bounds.height - mapFrame.maxY
+        hover.setSpace(CardSpace(mapOrigin: Pt(mapFrame.minX, y0), size: Pt(host.bounds.width, host.bounds.height), transform: transform))
+        print("card space: \(hover.tracker.space.map { "\($0)" } ?? "none")")
 
         let path = HoverSweep.path(in: map)
         var frames: [HoverSweep.Frame] = []
@@ -105,6 +111,7 @@ enum HoverSweepRunner {
         let scan = ScanCache.load() ?? Scanner(config: ArboristConfig.load()).scan()
         let model = AppModel(sweepWith: scan)
         precondition(model.cleanupDisabled, "snapshot must run with cleanup disabled")
+        if let f = requestedValue(for: "--filter") { model.applyFilterNames(f.split(separator: ",").map(String.init)) }
         let total = scan.repos.count
         model.simulateCachedScanning(done: max(0, total - 2), total: total)
         let host = NSHostingView(rootView: PopoverView().environmentObject(model).environmentObject(model.hover))

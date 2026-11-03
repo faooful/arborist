@@ -20,9 +20,8 @@ public enum LeafSVG {
     public static func popover(_ r: ScanResult, map: LeafMap, note: String = "Linux render", hover: String? = nil, now: Date = Date(),
                                cardAt: Pt? = nil, pointer: Pt? = nil, cardOpacity: Double = 1) -> String {
         let freeBytes = r.volume?.freeBytes ?? 0, totalBytes = r.volume?.totalBytes ?? 0
-        let pad = 16.0, w = map.width + pad * 2, mapTop = 52.0
+        let pad = svgPad, mapTop = svgMapTop, size = svgSize(map), w = size.x, h = size.y
         let keyTop = mapTop + map.height + 12
-        let h = keyTop + 92
         var s = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"\(f(w))\" height=\"\(f(h))\" viewBox=\"0 0 \(f(w)) \(f(h))\" font-family=\"-apple-system, 'SF Pro Text', Inter, 'DejaVu Sans', sans-serif\">"
         s += "<rect width=\"100%\" height=\"100%\" rx=\"14\" fill=\"\(LeafPalette.background)\"/>"
         let parts = r.headline.split(separator: " ", maxSplits: 2).map(String.init)   // "40" "worktrees" "in 34 repos · 5 stale"
@@ -52,11 +51,11 @@ public enum LeafSVG {
         s += "<text x=\"\(f(w - pad))\" y=\"\(f(btnY + 18))\" text-anchor=\"end\" font-size=\"10.5\" fill=\"\(LeafPalette.inkSoft)\">\(note)</text>"
         // Hover card on top of everything.
         if let id = hover, let leaf = map.leaves.first(where: { $0.item.id == id }), let ref = WorktreeList.find(r, path: id) {
-            let (x0, y0, x1, y1) = Geo.bbox(leaf.outline)
             let card = HoverCard(ref, now: now, home: LeafSample.home)
-            let o = cardAt ?? cardOrigin(avoiding: Rect(x: x0, y: y0, w: x1 - x0, h: y1 - y0), size: Pt(cardWidth, cardHeight(card)), in: Pt(map.width, map.height))
-            s += cardOpacity < 1 ? "<g opacity=\"\(cardOpacity)\">" + hoverCard(card, at: o + Pt(pad, mapTop)) + "</g>"
-                                 : hoverCard(card, at: o + Pt(pad, mapTop))
+            // D19: `cardAt` and the default placement are in popover coordinates, against the whole popover.
+            let o = cardAt ?? CardPlacement.place(leaf: cardSpace(map).leafRect(leaf), size: Pt(cardWidth, cardHeight(card)), in: size)
+            s += cardOpacity < 1 ? "<g opacity=\"\(cardOpacity)\">" + hoverCard(card, at: o) + "</g>"
+                                 : hoverCard(card, at: o)
         }
         // --hover-sweep frames mark the pointer (D15).
         if let p = pointer {
@@ -64,6 +63,12 @@ public enum LeafSVG {
         }
         return s + "</svg>"
     }
+
+    static let svgPad = 16.0, svgMapTop = 52.0
+    /// The SVG popover's size for `map`.
+    public static func svgSize(_ map: LeafMap) -> Pt { Pt(map.width + svgPad * 2, svgMapTop + map.height + 12 + 92) }
+    /// The SVG popover as a card space (D19): the map at (16, 52), drawn 1:1.
+    public static func cardSpace(_ map: LeafMap) -> CardSpace { CardSpace(mapOrigin: Pt(svgPad, svgMapTop), size: svgSize(map)) }
 
     /// Card metrics shared by the SVG and the app (D13).
     public static let cardWidth = 264.0

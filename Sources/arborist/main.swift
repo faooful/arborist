@@ -8,8 +8,8 @@ USAGE:
   arborist scan [--json] [--root PATH ...] [--max-depth N]
   arborist free [--json]
   arborist config            print the config file path and contents
-  arborist render [--sample|--busy|--from SCAN.json] [--hover N|PATH] --out FILE.svg   worktree leaf map as SVG (N: leaf drawn hovered)
-  arborist render [--sample|--busy|--from SCAN.json] --hover-sweep DIR   hover sweep: frame-NNN.svg + frames.json
+  arborist render [--sample|--busy|--from SCAN.json] [--filter NAME[,NAME]] [--hover N|PATH] --out FILE.svg   worktree leaf map as SVG (N: leaf drawn hovered)
+  arborist render [--sample|--busy|--from SCAN.json] [--filter NAME[,NAME]] --hover-sweep DIR   hover sweep: frame-NNN.svg + frames.json
   arborist render-stages --out FILE.svg        the four menu bar leaf stages as SVG
 
 Without --root, roots come from ~/.config/arborist/config.json (default: ~ and ~/Documents).
@@ -26,6 +26,7 @@ var outPath: String?
 var hoverArg: String?
 var fromPath: String?
 var sweepDir: String?
+var filterNames: [String]?
 var i = 0
 while i < args.count {
     switch args[i] {
@@ -34,6 +35,7 @@ while i < args.count {
     case "--out" where i + 1 < args.count: outPath = args[i + 1]; i += 1
     case "--from" where i + 1 < args.count: fromPath = args[i + 1]; i += 1
     case "--hover" where i + 1 < args.count: hoverArg = args[i + 1]; i += 1
+    case "--filter" where i + 1 < args.count: filterNames = args[i + 1].split(separator: ",").map(String.init); i += 1
     case "--hover-sweep" where i + 1 < args.count: sweepDir = args[i + 1]; i += 1
     case "--json", "--sample", "--busy": break
     case "-h", "--help": print(usage); exit(0)
@@ -61,8 +63,13 @@ case "render":
     let svg: String
     // --sample: small example; --busy: a busy machine (D13); --from FILE: a saved `scan --json`.
     let sample = args.contains("--sample") || args.contains("--busy") || fromPath != nil
-    let r = try! fromPath.map { try ScanResult.decode(Data(contentsOf: URL(fileURLWithPath: $0))) }
+    let unfiltered = try! fromPath.map { try ScanResult.decode(Data(contentsOf: URL(fileURLWithPath: $0))) }
         ?? (args.contains("--busy") ? LeafSample.busy : sample ? LeafSample.scan : Scanner(config: config).scan())
+    // --filter name[,name]: only those repos (by name or path), like the header filter (D18).
+    let r = filterNames.map { RepoFilter.only(names: $0, among: unfiltered.repos).apply(unfiltered) } ?? unfiltered
+    if filterNames != nil && r.repos.isEmpty {
+        FileHandle.standardError.write("--filter matched no repos; available: \(unfiltered.repos.map(\.name).joined(separator: ", "))\n".data(using: .utf8)!); exit(2)
+    }
     let map = LeafLayout.layout(LeafLayout.groups(from: r), staleCount: r.totals.staleWorktrees)
     // --hover N draws the Nth leaf hovered, with its card (for snapshots).
     // --hover N (leaf index) or --hover PATH (a worktree path).
@@ -73,7 +80,7 @@ case "render":
         // Same HoverTracker path as the app's mouse tracking (D15): frame-NNN.svg plus frames.json.
         try! FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         let path = HoverSweep.path(in: map)
-        let frames = HoverSweep.run(map, path: path) { i, t in
+        let frames = HoverSweep.run(map, path: path, space: LeafSVG.cardSpace(map)) { i, t in
             let svg = LeafSVG.popover(r, map: map, note: "hover sweep · frame \(i)", hover: t.card,
                                       now: sample ? LeafSample.now : Date(), cardAt: t.cardOrigin, pointer: path[i], cardOpacity: t.cardOpacity)
             try! svg.write(toFile: dir + String(format: "/frame-%03d.svg", i), atomically: true, encoding: .utf8)

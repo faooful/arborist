@@ -76,7 +76,7 @@ public struct GroupLabel: Equatable, Sendable {
     public var rect: Rect { let w = LeafText.width(name, size: LeafText.groupSize); return Rect(x: at.x - w / 2, y: at.y - 10, w: w, h: 13) }
 }
 
-public struct Rect: Equatable, Sendable {
+public struct Rect: Codable, Equatable, Sendable {
     public var x, y, w, h: Double
     public init(x: Double, y: Double, w: Double, h: Double) { self.x = x; self.y = y; self.w = w; self.h = h }
     public func intersects(_ o: Rect, gap: Double = 0) -> Bool {

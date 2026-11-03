@@ -7,8 +7,14 @@ import UserNotifications
 
 @MainActor
 final class AppModel: ObservableObject {
-    /// What the popover shows: the last finished scan, or the scan in progress built up repo by repo.
-    @Published var result: ScanResult?
+    /// The last finished scan, or the scan in progress built up repo by repo (every repo).
+    @Published var scanned: ScanResult?
+    /// Repos hidden by the header filter (D18), persisted in UserDefaults by repo path.
+    @Published private(set) var filter = RepoFilter.load()
+    /// What the popover shows: `scanned` with the filter applied. Map, counts, Clear and List all use this.
+    var result: ScanResult? { scanned.map(filter.apply) }
+    /// True when there are repos but the filter hides all of them.
+    var filterHidesEverything: Bool { scanned.map { filter.isEmpty($0.repos) } ?? false }
     @Published var scanning = false
     /// Repos measured so far in the running scan, and how many there are (nil until discovered).
     @Published private(set) var progress: (done: Int, total: Int?)?
@@ -32,12 +38,36 @@ final class AppModel: ObservableObject {
     /// Test hook (DEBUG only): one scan or the cache, no timers, no notifications, cleanup disabled.
     init(sweepWith result: ScanResult) {
         cleanupDisabled = true
-        self.result = result
+        self.scanned = result
+        filter = .all
         freeBytes = result.volume?.freeBytes
         relayout()
     }
 
+    /// Changes the filter, persists it and re-lays out the map. The caller animates (or not, for Reduce Motion).
+    func setFilter(_ f: RepoFilter) {
+        guard f != filter else { return }
+        hover.reset()
+        filter = f
+        if !cleanupDisabled { filter.save() }
+        relayout()
+    }
+
+    /// Repos that left the scan drop out of the exclusions quietly (only once a scan has finished).
+    private func pruneFilter() {
+        guard let s = scanned else { return }
+        let p = filter.pruned(to: s.repos)
+        if p != filter { filter = p; if !cleanupDisabled { filter.save() } }
+    }
+
     #if DEBUG
+    /// Sweep/snapshot hook only: `--filter name[,name]`, not persisted.
+    func applyFilterNames(_ names: [String]) {
+        precondition(cleanupDisabled)
+        guard let s = scanned else { return }
+        setFilter(RepoFilter.only(names: names, among: s.repos))
+    }
+
     /// Snapshot hook only: show the "cached, scan in progress" state without scanning.
     func simulateCachedScanning(done: Int, total: Int) {
         precondition(cleanupDisabled)
@@ -50,7 +80,7 @@ final class AppModel: ObservableObject {
         refreshFree()
         // Draw the last scan straight away, marked as cached, then refresh in the background (D11).
         if let cached = ScanCache.load() {
-            result = cached
+            scanned = cached
             resultIsCached = true
             relayout()
         }
@@ -76,7 +106,7 @@ final class AppModel: ObservableObject {
     // MARK: Cleanup (D14). Only reachable from a click in this UI, and always through the confirm sheet.
 
     /// Worktrees "Clear N" would remove or prune: merged or upstream gone, and nothing uncommitted, unpushed or locked.
-    var clearPlan: [CleanupItem] { cleanupDisabled ? [] : (result.map(Cleanup.plan) ?? []) }
+    var clearPlan: [CleanupItem] { cleanupDisabled ? [] : (scanned.map { Cleanup.plan($0, filter: filter) } ?? []) }
     /// Set to show the confirm sheet. Nothing runs until the sheet's Remove button is clicked.
     @Published var pendingCleanup: [CleanupItem]?
     /// What happened in the last run, shown until dismissed.
@@ -120,7 +150,7 @@ final class AppModel: ObservableObject {
         scanID += 1
         let id = scanID
         let cfg = config
-        let previous = result
+        let previous = scanned
         var partial: [Repo] = []
         Task {
             // Events arrive here on the main actor, in order; a newer scan makes older events no-ops.
@@ -144,12 +174,13 @@ final class AppModel: ObservableObject {
                                        repos: (partial + kept).sorted { $0.size.total > $1.size.total },
                                        caches: previous?.caches ?? [], skippedPaths: 0)
                     if let v = self.freeBytes, var vol = r.volume { vol.freeBytes = v; r.volume = vol }
-                    self.result = r
+                    self.scanned = r
                     self.scheduleRelayout()
                 case .caches:
                     break
                 case .finished(let r):
-                    self.result = r
+                    self.scanned = r
+                    self.pruneFilter()
                     self.resultIsCached = false
                     self.freeBytes = r.volume?.freeBytes ?? self.freeBytes
                     self.relayout()

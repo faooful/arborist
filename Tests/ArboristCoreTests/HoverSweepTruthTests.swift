@@ -44,6 +44,8 @@ final class HoverSweepTruthTests: XCTestCase {
         XCTAssertEqual(r.frames.count, 50)
         XCTAssertEqual(r.mismatches, 0, r.summary)
         XCTAssertGreaterThan(r.hoveredCount, 40)
+        XCTAssertEqual(r.cardClipped, 0, "D19: the card is always inside the popover. " + r.summary)
+        XCTAssertTrue(r.frames.contains { $0.cardRect != nil })
     }
 
     static func cliBinary() -> URL? {

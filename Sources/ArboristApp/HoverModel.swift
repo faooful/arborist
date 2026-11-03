@@ -23,7 +23,18 @@ final class HoverModel: ObservableObject {
     var cardOpacity: Double { tracker.cardOpacity }
 
     /// Layout → view mapping of the map as it is drawn right now (D15). Set by LeafMapView from its real size.
-    var transform = MapTransform.identity
+    var transform = MapTransform.identity { didSet { updateSpace() } }
+    /// The map's top-left in the popover's coordinate space, and the popover's size (D19). Set from the
+    /// "popover" named coordinate space; the card is placed against the whole popover, not the clipped map.
+    var mapOrigin = Pt(0, 0) { didSet { updateSpace() } }
+    var popoverSize: Pt? { didSet { updateSpace() } }
+
+    private func updateSpace() {
+        let s = popoverSize.map { CardSpace(mapOrigin: mapOrigin, size: $0, transform: transform) }
+        if s != tracker.space { tracker.space = s }
+    }
+    /// Sweep hook: the space measured from AppKit's real layout.
+    func setSpace(_ s: CardSpace) { mapOrigin = s.mapOrigin; transform = s.transform; popoverSize = s.size }
 
     /// Pointer at `p` in the map view's own coordinates (top-left, y down). Mouse events and the sweep both
     /// come in here; the point goes through the same transform the drawing uses.
@@ -73,6 +84,11 @@ final class HoverModel: ObservableObject {
     }
 
     func setCardSize(_ size: Pt) { tracker.cardSize = size }
+    /// The card's measured height; placement uses the taller of it and the Core slot (every row, D19).
+    func measuredCard(_ size: CGSize) {
+        let s = Pt(max(LeafSVG.cardSlot.x, size.width), max(LeafSVG.cardSlot.y, size.height))
+        if s != tracker.cardSize { tracker.cardSize = s }
+    }
 
     /// Test hook: applies a due leave right away (time is simulated by the sweep).
     func settle(at t: Double, animated: Bool) {
