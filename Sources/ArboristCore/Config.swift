@@ -14,7 +14,7 @@ public struct ArboristConfig: Codable, Equatable, Sendable {
 
     public static var home: String { FileManager.default.homeDirectoryForCurrentUser.path }
     public static var defaults: ArboristConfig {
-        ArboristConfig(roots: ["~", "~/Documents"], lowSpaceThresholdGB: 20, maxDepth: 4)
+        ArboristConfig(roots: ["~", "/tmp"], lowSpaceThresholdGB: 20, maxDepth: 4)
     }
     public init(roots: [String], lowSpaceThresholdGB: Double, maxDepth: Int,
                 leafStages: StageMultipliers = .default, showFreeText: Bool = true, scanTimeoutSeconds: Double = 180) {
@@ -28,6 +28,8 @@ public struct ArboristConfig: Codable, Equatable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = Self.defaults
         roots = try c.decodeIfPresent([String].self, forKey: .roots) ?? d.roots
+        // The v1 default only covered ~ and ~/Documents; treat it as "default" so saved configs pick up /tmp (D12).
+        if roots == ["~", "~/Documents"] { roots = d.roots }
         lowSpaceThresholdGB = try c.decodeIfPresent(Double.self, forKey: .lowSpaceThresholdGB) ?? d.lowSpaceThresholdGB
         maxDepth = try c.decodeIfPresent(Int.self, forKey: .maxDepth) ?? d.maxDepth
         leafStages = try c.decodeIfPresent(StageMultipliers.self, forKey: .leafStages) ?? d.leafStages

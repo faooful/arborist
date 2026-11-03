@@ -8,7 +8,7 @@ USAGE:
   arborist scan [--json] [--root PATH ...] [--max-depth N]
   arborist free [--json]
   arborist config            print the config file path and contents
-  arborist render [--sample] --out FILE.svg    leaf map (H8) as SVG, from a scan or the sample data
+  arborist render [--sample] [--hover N] --out FILE.svg   worktree leaf map as SVG (N: leaf drawn hovered)
   arborist render-stages --out FILE.svg        the four menu bar leaf stages as SVG
 
 Without --root, roots come from ~/.config/arborist/config.json (default: ~ and ~/Documents).
@@ -22,12 +22,14 @@ let json = args.contains("--json")
 var config = ArboristConfig.load()
 var roots: [String] = []
 var outPath: String?
+var hoverIndex: Int?
 var i = 0
 while i < args.count {
     switch args[i] {
     case "--root" where i + 1 < args.count: roots.append(args[i + 1]); i += 1
     case "--max-depth" where i + 1 < args.count: config.maxDepth = Int(args[i + 1]) ?? config.maxDepth; i += 1
     case "--out" where i + 1 < args.count: outPath = args[i + 1]; i += 1
+    case "--hover" where i + 1 < args.count: hoverIndex = Int(args[i + 1]); i += 1
     case "--json", "--sample": break
     case "-h", "--help": print(usage); exit(0)
     default: FileHandle.standardError.write("unknown argument: \(args[i])\n\n\(usage)\n".data(using: .utf8)!); exit(2)
@@ -52,13 +54,13 @@ case "config":
     print(String(decoding: try! e.encode(config), as: UTF8.self))
 case "render":
     let svg: String
-    if args.contains("--sample") {
-        svg = LeafSVG.popover(LeafLayout.layout(LeafSample.groups), freeBytes: LeafSample.freeBytes, totalBytes: LeafSample.totalBytes, note: "sample data · Linux render")
-    } else {
-        let r = Scanner(config: config).scan()
-        let map = LeafLayout.layout(LeafLayout.groups(from: r), staleCount: r.totals.staleWorktrees)
-        svg = LeafSVG.popover(map, freeBytes: r.volume?.freeBytes ?? 0, totalBytes: r.volume?.totalBytes ?? 0)
-    }
+    let sample = args.contains("--sample")
+    let r = sample ? LeafSample.scan : Scanner(config: config).scan()
+    let map = LeafLayout.layout(LeafLayout.groups(from: r), staleCount: r.totals.staleWorktrees)
+    // --hover N draws the Nth leaf hovered, with its card (for snapshots).
+    let hover = hoverIndex.flatMap { $0 < map.leaves.count ? map.leaves[$0].item.id : nil }
+    svg = LeafSVG.popover(r, map: map, note: sample ? "sample data · Linux render" : "Linux render", hover: hover,
+                          now: sample ? LeafSample.now : Date())
     write(svg)
 case "render-stages":
     write(LeafSVG.stageStrip())

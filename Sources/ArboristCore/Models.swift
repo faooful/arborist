@@ -43,6 +43,36 @@ public struct Worktree: Codable, Equatable, Sendable {
     public var size: SizeSplit
     /// Read-only helper: the command a person could run to remove this worktree. Never executed.
     public var removeCommand: String?
+    // Added in D12 (optional, so older JSON and caches still decode).
+    /// Subject line of the last commit.
+    public var lastCommitSubject: String?
+    /// Upstream branch, e.g. "origin/feat-x".
+    public var upstream: String?
+    /// Commits ahead of / behind the upstream (nil without one).
+    public var ahead: Int?
+    public var behind: Int?
+    /// Changed plus untracked files, from `git status`.
+    public var uncommittedFiles: Int?
+
+    /// One word for the worktree's state, most urgent first (D12).
+    public var status: WorktreeStatus {
+        if dirty { return .uncommitted }
+        if (unpushedCommits ?? 0) > 0 { return .unpushed }
+        if staleReasons.contains(.merged) { return .merged }
+        if stale { return .stale }
+        return .clean
+    }
+}
+
+/// Worktree state as shown on leaves, cards and the list (D12). Uncommitted and unpushed work wins over
+/// "merged/stale" so a worktree with work in it is never shown as safe to clear.
+public enum WorktreeStatus: String, Codable, Sendable, CaseIterable {
+    case uncommitted, unpushed, merged, stale, clean
+    public var word: String { rawValue }
+    /// Sort rank for the list: work in progress first, then cleanup candidates, then clean.
+    public var rank: Int {
+        switch self { case .uncommitted: 0; case .unpushed: 1; case .merged: 2; case .stale: 3; case .clean: 4 }
+    }
 }
 
 public struct Repo: Codable, Equatable, Sendable {
@@ -128,6 +158,16 @@ public struct ScanResult: Codable, Equatable, Sendable {
         repos = try c.decode([Repo].self, forKey: .repos)
         caches = try c.decode([CacheEntry].self, forKey: .caches)
         skippedPaths = try c.decode(Int.self, forKey: .skippedPaths)
+    }
+
+    public var worktreeCount: Int { repos.reduce(0) { $0 + $1.worktrees.count } }
+
+    /// Header line, e.g. "40 worktrees in 34 repos · 5 stale" (D12).
+    public var headline: String {
+        let w = worktreeCount, r = repos.count, s = totals.staleWorktrees
+        var t = "\(w) worktree\(w == 1 ? "" : "s") in \(r) repo\(r == 1 ? "" : "s")"
+        if s > 0 { t += " · \(s) stale" }
+        return t
     }
 
     public func jsonData() throws -> Data {

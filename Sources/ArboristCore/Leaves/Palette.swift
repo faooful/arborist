@@ -34,6 +34,24 @@ public enum LeafPalette {
         default: ("#7f8a70", 0x48 / 255.0)
         }
     }
+    /// Rebuildable inner share (D12): a darker wash inside the leaf.
+    public static let rebuildableShade = "#2f3a28"
+    public static func rebuildableOpacity(_ s: LeafState) -> Double { s == .protected ? 0.28 : 0.16 }
+    /// Hover: outline of the hovered leaf, and how much the others fade.
+    public static let hoverStroke = "#2f3a28"
+    public static let dimOthers = 0.5
+    public static let cardFill = "#fffdf7"
+    public static let cardStroke = "#d8d1bf"
+    /// Status dot colour for a worktree status.
+    public static func dot(_ s: WorktreeStatus) -> String {
+        switch s {
+        case .uncommitted: "#5f6d4c"
+        case .unpushed: "#7d8a6a"
+        case .merged, .stale: "#b8976a"
+        case .clean: "#b3bba5"
+        }
+    }
+
     public static func isDark(_ s: LeafState) -> Bool { s == .protected }
 
     /// "#rrggbb" -> (r, g, b) in 0…1.
