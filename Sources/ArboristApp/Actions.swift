@@ -1,6 +1,7 @@
 #if os(macOS)
 import AppKit
 import ArboristCore
+import os
 import SwiftUI
 
 /// D22: the app side of the action seam. Settings, Quit, Rescan and List go through `PopoverActionRouter`
@@ -73,6 +74,8 @@ final class SettingsOpener {
                         let front = w.map { win in NSApp.orderedWindows.first { $0.isVisible } == win } ?? false
                         self.lastReport = (log + ["bridge=\(self.openAction != nil)", "settingsWindow=\(w != nil)",
                                                   "active=\(NSApp.isActive)", "key=\(key)", "front=\(front)"]).joined(separator: ", ")
+                        // D23: the real gear click logs here too: log stream --predicate 'subsystem == "com.faooful.arborist"'
+                        Logger(subsystem: "com.faooful.arborist", category: "settings").notice("settings: \(self.lastReport, privacy: .public)")
                         done?(self.lastReport)
                     }
                 }
