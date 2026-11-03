@@ -37,6 +37,14 @@ final class AppModel: ObservableObject {
         relayout()
     }
 
+    #if DEBUG
+    /// Snapshot hook only: show the "cached, scan in progress" state without scanning.
+    func simulateCachedScanning(done: Int, total: Int) {
+        precondition(cleanupDisabled)
+        resultIsCached = true; scanning = true; progress = (done, total)
+    }
+    #endif
+
     init() {
         cleanupDisabled = false
         refreshFree()

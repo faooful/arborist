@@ -31,6 +31,7 @@ final class AppSurfaceTests: XCTestCase {
         _ = (v.hovered, v.card, v.cardOrigin, v.cardUnderPointer, v.pinned, tracker.cardOpacity, tracker.cardOrigin, tracker.cardRect, tracker.pinned)
         _ = (LeafMap.hitRadius, map.hit(at: Pt(1, 1)), LeafSVG.appCardExtra)
         let mt = MapTransform.fit(map, into: Pt(448, 400))
+        _ = (MapTransform.usable(map, into: Pt(448, 400)), PopoverLayout.width, PopoverLayout.padding, PopoverLayout.mapWidth, PopoverLayout.mapHeight, PopoverLayout.minMapSide)
         _ = (mt.toView(Pt(1, 1)), mt.toMap(Pt(1, 1)), mt.scale, mt.dx, mt.dy, MapTransform.identity, map.hit(view: Pt(1, 1), mt))
         let path = HoverSweep.path(in: map)
         let frames = HoverSweep.run(map, path: path) { _, _ in }

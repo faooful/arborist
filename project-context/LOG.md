@@ -13,3 +13,4 @@
 
 | 2026-11-03 | Hover fix (D15): stale-cardRect freeze removed; MapTransform shared by drawing and hit-testing; NSTrackingArea input; nearest-edge hit within 10 pt, 80 ms grace on map exit; stable corner card with slide/cross-fade, click to pin; one HoverModel/transaction; `--hover-sweep` hooks (app DEBUG+env, CLI). |
 | 2026-11-03 | Far-gap clear (D16): hover clears 80 ms after entering a gap >10 pt from every leaf (same cancellable timer; re-entry/snap cancels; pinned stays). Sweep: `expected = underPointer ?? snappedTo`, mismatch = hovered ≠ expected; busy sweep 0 mismatches. |
+| 2026-11-03 | Popover size fix (D17): map collapsed in the MenuBarExtra window (GeometryReader + aspectRatio had no ideal height; zero-size fallback drew at 1:1 unclipped). Fixed 448×400 clipped map frame, PopoverLayout constants, fixedSize root, MapTransform.usable, sizeThatFits on tracking view, same placeholder size, `--snapshot` hook. |

@@ -118,6 +118,11 @@ struct MouseTracking: NSViewRepresentable {
     func updateNSView(_ v: TrackingNSView, context: Context) {
         v.onMove = onMove; v.onExit = onExit
     }
+    /// Takes exactly the size it is offered (it is a background of the map's fixed frame), and never
+    /// contributes a zero or ideal size of its own (D17).
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: TrackingNSView, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? PopoverLayout.mapWidth, height: proposal.height ?? PopoverLayout.mapHeight)
+    }
 
     final class TrackingNSView: NSView {
         // NSView and its event methods are main-actor isolated, so these are called on the main actor.
@@ -126,6 +131,7 @@ struct MouseTracking: NSViewRepresentable {
         private var area: NSTrackingArea?
 
         override var isFlipped: Bool { true } // top-left origin, like the map
+        override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric) }
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
         override func viewDidMoveToWindow() {

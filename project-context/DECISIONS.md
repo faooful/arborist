@@ -78,3 +78,12 @@ D15 kept the last leaf hovered anywhere inside the map. The leaf shapes don't fi
 - **Timer.** The app applies the clear with the same single cancellable timer, scheduled for the time remaining until the deadline.
 - **Pinned card.** A pinned card stays until it is unpinned.
 - **Sweep.** The sweep (instant mode) applies a pending clear by advancing time past the grace. In frames.json, `expected = underPointer ?? snappedTo`, and a mismatch is any frame where `hovered != expected`.
+
+## D17: Fixed popover and map size (2026-11-03)
+
+**Bug (from #6).** LeafMapView was a `GeometryReader` with `.aspectRatio(.fit)` and `.frame(maxWidth: .infinity)`, so it had no fixed size. A MenuBarExtra `.window` sizes itself to its content's ideal size, and a GeometryReader's ideal height is near zero, so the map collapsed. `MapTransform.fit` fell back to scale 1 for a zero-height view, so the leaves were drawn at full size and spilled out unclipped behind the legend, bar and footer, and the popover was only about 160 pt tall. This happened in every state that has a map (cached, scanning, done). It wasn't specific to the cached-then-scanning state.
+- **Fixed frame.** `PopoverLayout` (Core): popover 480 wide with 16 pt padding, map 448×400. The map view has an explicit `.frame(448, 400)`, is clipped (`clipShape` and `clipped`), and the GeometryReader lives inside that frame.
+- **Popover root.** `.frame(width: 480)` with `.fixedSize(horizontal: false, vertical: true)`. The empty/scanning placeholder uses the same 448×400 box, so every state has the same layout.
+- **No transform from a collapsed frame.** `MapTransform.usable` returns nil below 64 pt on either side, or for a non-finite size. The view then draws nothing and keeps the last good transform.
+- **Tracking view.** The NSViewRepresentable reports the proposed size from `sizeThatFits` and has no intrinsic size.
+- **Check.** `ARBORIST_HOVER_SWEEP=1 … --snapshot PNG` (DEBUG only) renders the cached + scanning state at its fitting size, prints the popover size and map frame, and exits 3 if the map isn't 448×400.
