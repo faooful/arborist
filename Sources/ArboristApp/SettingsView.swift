@@ -23,6 +23,12 @@ struct SettingsView: View {
                 Stepper("Search depth: \(model.config.maxDepth)", value: $model.config.maxDepth, in: 1...8)
                     .onChange(of: model.config.maxDepth) { _ in model.saveConfig() }
             }
+            Section("Menu bar") {
+                Toggle("Show free space next to the leaf", isOn: $model.config.showFreeText)
+                    .onChange(of: model.config.showFreeText) { _ in model.saveConfig() }
+                Text("The leaf wilts at \(fmt(model.config.leafStages.healthy))×, \(fmt(model.config.leafStages.droop))× and \(fmt(model.config.leafStages.wilted))× the alert level. Change the multipliers under leafStages in the config file.")
+                    .font(.caption).foregroundColor(.secondary)
+            }
             Section("Low space alert") {
                 Stepper("Notify below \(Int(model.config.lowSpaceThresholdGB)) GB free",
                         value: $model.config.lowSpaceThresholdGB, in: 1...500, step: 5)
@@ -34,6 +40,8 @@ struct SettingsView: View {
         .padding(20)
         .frame(width: 460)
     }
+
+    private func fmt(_ v: Double) -> String { v == v.rounded() ? String(Int(v)) : String(v) }
 
     private func addFolder() {
         let panel = NSOpenPanel()
