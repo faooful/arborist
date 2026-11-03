@@ -4,7 +4,7 @@ import XCTest
 
 /// D15: the sweep's ground truth (plain point-in-polygon on drawn outlines in view coordinates) agrees
 /// with what HoverTracker hovers, on the busy sample.
-final class HoverSweepTruthTests: XCTestCase {
+final class HoverSweepTruthTests: XCTestCase, @unchecked Sendable {
     let map: LeafMap = {
         let r = LeafSample.busy
         return LeafLayout.layout(LeafLayout.groups(from: r), staleCount: r.totals.staleWorktrees)

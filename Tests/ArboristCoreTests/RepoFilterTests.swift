@@ -4,7 +4,7 @@ import Foundation
 import XCTest
 
 /// D18: the header repo filter.
-final class RepoFilterTests: XCTestCase {
+final class RepoFilterTests: XCTestCase, @unchecked Sendable {
     let scan = LeafSample.busy
     var repos: [Repo] { scan.repos }
     var a: Repo { repos[0] }
@@ -131,7 +131,7 @@ final class RepoFilterTests: XCTestCase {
 }
 
 /// D22: the tooltip follows the pointer 12 pt off, flips at the edges and always stays inside the popover.
-final class TooltipPlacementTests: XCTestCase {
+final class TooltipPlacementTests: XCTestCase, @unchecked Sendable {
     let bounds = Pt(480, 600), size = TooltipPlacement.size
 
     func inside(_ o: Pt) -> Bool { Rect(x: o.x, y: o.y, w: size.x, h: size.y).inside(width: bounds.x, height: bounds.y) }
@@ -182,7 +182,7 @@ final class TooltipPlacementTests: XCTestCase {
 }
 
 /// D22: the docked strip and its fixed button frames.
-final class StripLayoutTests: XCTestCase {
+final class StripLayoutTests: XCTestCase, @unchecked Sendable {
     func testStripSitsBelowTheMapInsideThePopover() {
         let s = PopoverSpace(mapOrigin: Pt(16, 52), size: Pt(480, 700))
         XCTAssertEqual(s.stripRect, Rect(x: 16, y: 52 + 400 + PopoverLayout.stripGap, w: 448, h: PopoverLayout.stripHeight))

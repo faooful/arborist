@@ -1,7 +1,7 @@
 import XCTest
 @testable import ArboristCore
 
-final class WorktreeParsingTests: XCTestCase {
+final class WorktreeParsingTests: XCTestCase, @unchecked Sendable {
     func testStatusV2() {
         let s = GitParsing.parseStatusV2("""
         # branch.oid abc
@@ -25,7 +25,7 @@ final class WorktreeParsingTests: XCTestCase {
     }
 }
 
-final class WorktreeLabelAndListTests: XCTestCase {
+final class WorktreeLabelAndListTests: XCTestCase, @unchecked Sendable {
     func testLabelIsBranchThenRepo() {
         XCTAssertEqual(WorktreeLabel.text(branch: "feat-t5b-handover", head: nil, repo: "property-management"), "feat-t5b-handover · property-management")
         XCTAssertEqual(WorktreeLabel.text(branch: nil, head: "abc1234def", repo: "farm"), "detached @abc1234 · farm")
@@ -82,7 +82,7 @@ final class WorktreeLabelAndListTests: XCTestCase {
 }
 
 /// Discovery across the machine, against real git.
-final class DiscoveryTests: XCTestCase {
+final class DiscoveryTests: XCTestCase, @unchecked Sendable {
     var base = ""
     let fm = FileManager.default
     override func setUpWithError() throws {

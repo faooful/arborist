@@ -4,7 +4,7 @@ import XCTest
 
 /// D14: the safety rule, re-checks before acting, prune-only, the log, and the CLI's read-only boundary.
 /// Uses real git repos in a temp folder.
-final class CleanupTests: XCTestCase {
+final class CleanupTests: XCTestCase, @unchecked Sendable {
     let fm = FileManager.default
     var base = ""
 
