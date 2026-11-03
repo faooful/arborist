@@ -56,7 +56,7 @@ final class HoverCalmTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(t.hovered, a.item.id)
         t.exit(at: 6)
         XCTAssertTrue(t.settle(at: 6 + HoverTracker.leaveDelay))
-        XCTAssertNil(t.hovered); XCTAssertNil(t.strip); XCTAssertNil(t.tooltipOrigin)
+        XCTAssertNil(t.hovered); XCTAssertNil(t.strip)
         XCTAssertLessThanOrEqual(HoverTracker.leaveDelay, 0.1)
     }
 
@@ -89,9 +89,8 @@ final class HoverCalmTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(t.strip, a.item.id, "the strip keeps the pinned leaf")
         XCTAssertEqual(t.appearance(of: a.item.id).ring, LeafPalette.ringPinned)
         XCTAssertEqual(t.appearance(of: b.item.id).ring, LeafPalette.ringHover)
-        XCTAssertNotNil(t.tooltipOrigin)
         t.exit(at: 0.2); XCTAssertTrue(t.settle(at: 5)); XCTAssertNil(t.hovered)
-        XCTAssertEqual(t.pinned, a.item.id, "a pin survives leaving the map"); XCTAssertNil(t.tooltipOrigin)
+        XCTAssertEqual(t.pinned, a.item.id, "a pin survives leaving the map")
         t.click(at: a.centroid, in: map); XCTAssertNil(t.pinned, "clicking the pinned leaf unpins")
         t.click(at: b.centroid, in: map); XCTAssertEqual(t.pinned, b.item.id, "clicking another leaf moves the pin")
         t.click(at: Pt(-500, -500), in: map); XCTAssertNil(t.pinned, "empty space unpins")
@@ -104,6 +103,6 @@ final class HoverCalmTests: XCTestCase, @unchecked Sendable {
         let frames = HoverSweep.run(map)
         let s = String(decoding: HoverSweep.json(frames), as: UTF8.self)
         XCTAssertTrue(s.contains("\"hovered\" : null"))
-        XCTAssertTrue(s.contains("\"tooltipClipped\" : false"))
+        XCTAssertFalse(s.contains("tooltip"), "D25: no tooltip fields")
     }
 }

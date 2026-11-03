@@ -104,11 +104,10 @@ final class RepoFilterTests: XCTestCase, @unchecked Sendable {
         let rep = HoverSweep.Report(HoverSweep.run(map, space: LeafSVG.popoverSpace(map), rows: 5, perRow: 30))
         XCTAssertEqual(rep.mismatches, 0, rep.summary)
         XCTAssertEqual(rep.stripMismatches, 0, rep.summary)
-        XCTAssertEqual(rep.tooltipClipped, 0, rep.summary)
         XCTAssertEqual(rep.reachFailures, 0, rep.summary)
     }
 
-    /// The real CLI with --filter: 0 mismatches, no strip mismatches, no clipped tooltips, the pin holds.
+    /// The real CLI with --filter: 0 mismatches, no strip mismatches, D25 panel checks 0, the pin holds.
     func testCLISweepWithFilter() throws {
         let bin = try XCTUnwrap(HoverSweepTruthTests.cliBinary())
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("fsweep-\(UUID().uuidString)")
@@ -122,62 +121,11 @@ final class RepoFilterTests: XCTestCase, @unchecked Sendable {
         let r = try JSONDecoder().decode(HoverSweep.Report.self, from: Data(contentsOf: dir.appendingPathComponent("frames.json")))
         XCTAssertEqual(r.mismatches, 0, r.summary)
         XCTAssertEqual(r.stripMismatches, 0, r.summary)
-        XCTAssertEqual(r.tooltipClipped, 0, r.summary)
+        XCTAssertEqual(r.idleEmptyGapViolations + r.legendTruncations + r.hoverTransitions, 0, r.summary)
         XCTAssertEqual(r.reachFailures, 0, r.summary)
         XCTAssertGreaterThan(r.hoveredCount, 0)
         let shown = Set((a.worktrees + b.worktrees).map(\.path))
         for f in r.frames { if let h = f.hovered { XCTAssertTrue(shown.contains(h), h) } }
-    }
-}
-
-/// D22: the tooltip follows the pointer 12 pt off, flips at the edges and always stays inside the popover.
-final class TooltipPlacementTests: XCTestCase, @unchecked Sendable {
-    let bounds = Pt(480, 600), size = TooltipPlacement.size
-
-    func inside(_ o: Pt) -> Bool { Rect(x: o.x, y: o.y, w: size.x, h: size.y).inside(width: bounds.x, height: bounds.y) }
-
-    func testOffsetBelowRight() {
-        XCTAssertEqual(TooltipPlacement.place(pointer: Pt(100, 100), in: bounds), Pt(112, 112))
-    }
-
-    func testFlipsAtTheRightAndBottom() {
-        let p = Pt(470, 590), o = TooltipPlacement.place(pointer: p, in: bounds)
-        XCTAssertEqual(o, Pt(470 - 12 - size.x, 590 - 12 - size.y))
-        XCTAssertTrue(inside(o))
-    }
-
-    func testAlwaysInsideAndNeverUnderThePointer() {
-        for x in stride(from: 0.0, through: 480, by: 7) {
-            for y in stride(from: 0.0, through: 600, by: 7) {
-                let o = TooltipPlacement.place(pointer: Pt(x, y), in: bounds)
-                XCTAssertTrue(inside(o), "\(x),\(y)")
-                XCTAssertFalse(Rect(x: o.x, y: o.y, w: size.x, h: size.y).contains(Pt(x, y)), "\(x),\(y)")
-            }
-        }
-    }
-
-    /// The busy map in the real popover space, also scaled: tooltip never clipped, strip always right.
-    func testSweepNeverClipsTheTooltip() {
-        let r = LeafSample.busy
-        let map = LeafLayout.layout(LeafLayout.groups(from: r), staleCount: r.totals.staleWorktrees)
-        let app = PopoverSpace(mapOrigin: Pt(16, 52), size: Pt(480, 52 + 400 + PopoverLayout.stripGap + PopoverLayout.stripHeight + 110),
-                               transform: .fit(map, into: Pt(448, 400)))
-        for space in [LeafSVG.popoverSpace(map), app] {
-            let rep = HoverSweep.Report(HoverSweep.run(map, transform: space.transform, space: space, rows: 9, perRow: 40))
-            XCTAssertEqual(rep.tooltipClipped, 0, rep.summary)
-            XCTAssertEqual(rep.mismatches, 0, rep.summary)
-            XCTAssertEqual(rep.stripMismatches, 0, rep.summary)
-            XCTAssertEqual(rep.reachFailures, 0, rep.summary)
-            XCTAssertGreaterThan(rep.tooltipFrames, 100)
-        }
-    }
-
-    /// A popover too small for the tooltip is reported as clipped.
-    func testClippedIsDetected() {
-        let r = LeafSample.busy
-        let map = LeafLayout.layout(LeafLayout.groups(from: r), staleCount: r.totals.staleWorktrees)
-        let tiny = PopoverSpace(mapOrigin: Pt(0, 0), size: Pt(150, 40))
-        XCTAssertGreaterThan(HoverSweep.Report(HoverSweep.run(map, space: tiny)).tooltipClipped, 0)
     }
 }
 

@@ -16,10 +16,10 @@ public enum LeafSVG {
     }
 
     /// The popover as an SVG (worktree-first, D12, D22): headline, map, detail strip, key, free bar and Clear.
-    /// `hover` is the hovered leaf (ringed, in the strip unless `pinned`); `pointer` (map coordinates) places
-    /// the tooltip and draws the sweep's pointer marker.
+    /// `hover` is the hovered leaf (ringed, in the panel unless one is `pinned`, i.e. selected); `pointer`
+    /// (map coordinates) draws the sweep's pointer marker. D25: no tooltip; the panel is the readout.
     public static func popover(_ r: ScanResult, map: LeafMap, note: String = "Linux render", hover: String? = nil, pinned: String? = nil,
-                               now: Date = Date(), pointer: Pt? = nil, tooltipAt: Pt? = nil) -> String {
+                               now: Date = Date(), pointer: Pt? = nil, showAll: Bool = false) -> String {
         let freeBytes = r.volume?.freeBytes ?? 0, totalBytes = r.volume?.totalBytes ?? 0
         let pad = svgPad, mapTop = svgMapTop, size = svgSize(map), w = size.x, h = size.y
         let space = popoverSpace(map)
@@ -38,33 +38,13 @@ public enum LeafSVG {
         if let shown {
             s += strip(shown, pinned: pinned != nil, in: slot).svg
         } else {
-            let keyTop = slot.y + StripLayout.padding
-            var x = pad
-            for (state, name) in [(LeafState.protected, "Uncommitted / unpushed"), (.clean, "Clean"), (.stale, "Merged / stale")] {
-                s += "<circle cx=\"\(f(x + 4))\" cy=\"\(f(keyTop + 4.5))\" r=\"4\" fill=\"\(LeafPalette.fill(state))\"/>"
-                s += "<text x=\"\(f(x + 13))\" y=\"\(f(keyTop + 8.5))\" font-size=\"11\" fill=\"\(LeafPalette.inkSoft)\">\(name)</text>"
-                x += 26 + LeafText.width(name, size: 11, weight: false)
-            }
-            if let c = Format.cachesTotal(r.caches) {
-                s += "<text x=\"\(f(w - pad))\" y=\"\(f(keyTop + 8.5))\" text-anchor=\"end\" font-size=\"11\" fill=\"\(LeafPalette.inkSoft)\">\(esc(c))</text>"
-            }
-            let barY = keyTop + 24, frac = totalBytes > 0 ? 1 - Double(freeBytes) / Double(totalBytes) : 0
-            s += "<rect x=\"\(pad)\" y=\"\(f(barY))\" width=\"\(f(map.width))\" height=\"6\" rx=\"3\" fill=\"\(LeafPalette.barTrack)\"/>"
-            s += "<rect x=\"\(pad)\" y=\"\(f(barY))\" width=\"\(f(map.width * frac))\" height=\"6\" rx=\"3\" fill=\"\(LeafPalette.barFill)\"/>"
-            s += "<text x=\"\(pad)\" y=\"\(f(barY + 20))\" font-size=\"11\" fill=\"\(LeafPalette.inkSoft)\"><tspan fill=\"\(LeafPalette.ink)\" font-weight=\"500\">\(esc(Format.bytes(freeBytes)))</tspan> free</text>"
-            s += "<text x=\"\(f(w - pad))\" y=\"\(f(barY + 20))\" text-anchor=\"end\" font-size=\"11\" fill=\"\(LeafPalette.inkSoft)\">of \(esc(Format.bytes(totalBytes)))</text>"
-            s += "<text x=\"\(f(w - pad))\" y=\"\(f(slot.y + slot.h - 6))\" text-anchor=\"end\" font-size=\"10.5\" fill=\"\(LeafPalette.inkSoft)\">\(note)</text>"
+            s += rest(r, in: slot, showAll: showAll).svg + "<!-- \(esc(note)) -->"
         }
         for (name, b) in FooterLayout.buttons(in: space.footerRect) {
             let label = name == "Clear" ? "Clear \(map.staleCount)" : name == "Settings" ? "⚙" : name == "Quit" ? "⏻" : name
             let dark = name == "Clear"
             s += "<rect x=\"\(f(b.x))\" y=\"\(f(b.y))\" width=\"\(f(b.w))\" height=\"\(f(b.h))\" rx=\"7\" fill=\"\(dark ? LeafPalette.button : "none")\"/>"
             s += text(b.x + b.w / 2, b.y + 18, label, size: 12, color: dark ? LeafPalette.labelOnDark : LeafPalette.inkSoft, weight: dark ? 500 : 400)
-        }
-        // D22: the tooltip next to the pointer, on top of everything.
-        if let id = hover, let ref = WorktreeList.find(r, path: id), let p = pointer ?? map.leaves.first(where: { $0.item.id == id })?.centroid {
-            let o = tooltipAt ?? TooltipPlacement.place(pointer: space.toPopover(p), in: size)
-            s += tooltip(LeafTooltip(HoverCard(ref, now: now, home: LeafSample.home)), at: o)
         }
         if let p = pointer {
             s += "<circle cx=\"\(f(p.x + pad))\" cy=\"\(f(p.y + mapTop))\" r=\"3.5\" fill=\"#d0402b\" stroke=\"#fff\" stroke-width=\"1\"/>"
@@ -80,41 +60,67 @@ public enum LeafSVG {
     }
 
     /// D24: what `popover` draws for this hover state: the map's frame, the strip's height and its frames.
-    public static func drawn(_ r: ScanResult, map: LeafMap, hover: String?, pinned: String?, now: Date = Date()) -> HoverSweep.Drawn {
+    public static func drawn(_ r: ScanResult, map: LeafMap, hover: String?, pinned: String?, now: Date = Date(),
+                             showAll: Bool = false, previousStrip: String?? = nil) -> HoverSweep.Drawn {
+        let strip0 = pinned ?? hover
+        let transition = previousStrip.map { PanelTransition.between($0, strip0) } ?? .none
         let space = popoverSpace(map)
         let shown = (pinned ?? hover).flatMap { WorktreeList.find(r, path: $0) }.map { HoverCard($0, now: now, home: LeafSample.home) }
         let mapFrame = Rect(x: svgPad, y: svgMapTop, w: map.width, h: map.height)
         let footer = FooterLayout.buttons(in: space.footerRect).map(\.rect)
-        guard let shown else { return HoverSweep.Drawn(mapFrame: mapFrame, stripHeight: 0, stripFrames: nil, slotFrame: space.stripRect, footerButtons: footer) }
+        guard let shown else {
+            let rs = rest(r, in: space.stripRect, showAll: showAll)
+            return HoverSweep.Drawn(mapFrame: mapFrame, stripHeight: 0, stripFrames: nil, slotFrame: space.stripRect, footerButtons: footer,
+                                    restFrames: rs.frames, legend: rs.legend, transition: transition)
+        }
         let st = strip(shown, pinned: pinned != nil, in: space.stripRect)
-        return HoverSweep.Drawn(mapFrame: mapFrame, stripHeight: space.stripRect.h, stripFrames: st.frames, slotFrame: space.stripRect, footerButtons: footer)
+        return HoverSweep.Drawn(mapFrame: mapFrame, stripHeight: space.stripRect.h, stripFrames: st.frames, slotFrame: space.stripRect,
+                                footerButtons: footer, transition: transition)
     }
     /// The SVG popover as a popover space: the map at (16, 52), drawn 1:1.
     public static func popoverSpace(_ map: LeafMap) -> PopoverSpace { PopoverSpace(mapOrigin: Pt(svgPad, svgMapTop), size: svgSize(map)) }
 
-    static func tooltip(_ t: LeafTooltip, at o: Pt) -> String {
-        let z = TooltipPlacement.size
-        var s = "<g pointer-events=\"none\">"
-        s += "<rect x=\"\(f(o.x))\" y=\"\(f(o.y))\" width=\"\(f(z.x))\" height=\"\(f(z.y))\" rx=\"6\" fill=\"\(LeafPalette.cardFill)\" stroke=\"\(LeafPalette.cardStroke)\" stroke-width=\".6\"/>"
-        s += "<text x=\"\(f(o.x + 8))\" y=\"\(f(o.y + 16))\" font-size=\"11.5\" font-weight=\"600\" fill=\"\(LeafPalette.ink)\">\(esc(clip(t.branch, 30)))</text>"
-        s += "<text x=\"\(f(o.x + 8))\" y=\"\(f(o.y + 31))\" font-size=\"10.5\" fill=\"\(LeafPalette.inkSoft)\">\(esc(clip(t.repo, 32)))</text>"
-        s += "<text x=\"\(f(o.x + 8))\" y=\"\(f(o.y + 45))\" font-size=\"10.5\" fill=\"\(LeafPalette.ink)\">\(esc(t.size))</text>"
-        return s + "</g>"
+    /// D25: the resting panel (same content as the app's RestPanel): legend, storage bar and labels, and the
+    /// 2 × 4 summary grid, all from RestLayout. Returns its content frames and legend measures.
+    static func rest(_ r: ScanResult, in slot: Rect, showAll: Bool) -> (svg: String, frames: [Rect], legend: [LegendMeasure]) {
+        let soft = LeafPalette.inkSoft, ink = LeafPalette.ink
+        func o(_ q: Rect) -> Rect { Rect(x: slot.x + q.x, y: slot.y + q.y, w: q.w, h: q.h) }
+        let all = r.repos.flatMap(\.worktrees)
+        let labels = RestLayout.legendLabels(ready: all.filter(CleanupSafety.isReady).count, showAll: showAll)
+        let colours: [String] = [LeafPalette.fill(.protected), LeafPalette.fill(.clean), LeafPalette.fill(.stale), LeafPalette.ring, "none"]
+        var s = "", legend: [LegendMeasure] = []
+        for (k, item) in RestLayout.legend(labels).enumerated() {
+            let it = o(item.item), tx = o(item.text)
+            if colours[k] != "none" { s += "<circle cx=\"\(f(it.x + 8))\" cy=\"\(f(it.y + 9))\" r=\"4\" fill=\"\(colours[k])\"/>" }
+            s += "<text x=\"\(f(tx.x))\" y=\"\(f(tx.y + 13))\" font-size=\"11\" fill=\"\(soft)\">\(esc(fit(item.label, tx.w, 11, medium: false)))</text>"
+            legend.append(LegendMeasure(label: item.label, natural: LeafText.width(item.label, size: 11, weight: false), frame: tx))
+        }
+        let freeBytes = r.volume?.freeBytes ?? 0, totalBytes = r.volume?.totalBytes ?? 0
+        let bar = o(RestLayout.row("bar")), st = o(RestLayout.row("storage"))
+        let frac = totalBytes > 0 ? 1 - Double(freeBytes) / Double(totalBytes) : 0
+        s += "<rect x=\"\(f(bar.x))\" y=\"\(f(bar.y))\" width=\"\(f(bar.w))\" height=\"6\" rx=\"3\" fill=\"\(LeafPalette.barTrack)\"/>"
+        s += "<rect x=\"\(f(bar.x))\" y=\"\(f(bar.y))\" width=\"\(f(bar.w * frac))\" height=\"6\" rx=\"3\" fill=\"\(LeafPalette.barFill)\"/>"
+        s += "<text x=\"\(f(st.x))\" y=\"\(f(st.y + 11))\" font-size=\"11\" fill=\"\(soft)\"><tspan fill=\"\(ink)\" font-weight=\"500\">\(esc(Format.bytes(freeBytes)))</tspan> free</text>"
+        s += "<text x=\"\(f(st.x + st.w))\" y=\"\(f(st.y + 11))\" text-anchor=\"end\" font-size=\"11\" fill=\"\(soft)\">of \(esc(Format.bytes(totalBytes)))</text>"
+        for (cell, kv) in zip(RestLayout.cells.map(o), RestSummary.cells(r)) {
+            s += "<text x=\"\(f(cell.x))\" y=\"\(f(cell.y + 10))\" font-size=\"10\" fill=\"\(soft)\">\(esc(fit(kv.label, cell.w, 10, medium: false)))</text>"
+            s += "<text x=\"\(f(cell.x))\" y=\"\(f(cell.y + 23))\" font-size=\"11.5\" font-weight=\"500\" font-variant-numeric=\"tabular-nums\" fill=\"\(ink)\">\(esc(fit(kv.value, cell.w, 11.5)))</text>"
+        }
+        return (s, RestLayout.frames(in: slot, legend: labels), legend)
     }
 
     /// D22/D24: the leaf details in the shared slot (same content as the app's DetailStrip). Every frame comes
     /// from StripLayout; each text is cut to its frame's width; returns the frames it drew into.
     static func strip(_ c: HoverCard, pinned: Bool, in r: Rect) -> (svg: String, frames: [Rect]) {
         let soft = LeafPalette.inkSoft, ink = LeafPalette.ink
-        let named = StripLayout.named(in: r, branch: c.branch, tag: c.pill, repo: c.repo, pinned: pinned)
+        let named = StripLayout.named(in: r, branch: c.branch, tag: c.pill, repo: c.repo)
         func at(_ n: String) -> Rect { named.first { $0.name == n }!.rect }
-        var s = "<rect x=\"\(f(r.x))\" y=\"\(f(r.y))\" width=\"\(f(r.w))\" height=\"\(f(r.h))\" rx=\"9\" fill=\"\(LeafPalette.cardFill)\" stroke=\"\(pinned ? LeafPalette.ring : LeafPalette.cardStroke)\" stroke-width=\"\(pinned ? 1.2 : 0.6)\"/>"
+        var s = "<rect x=\"\(f(r.x))\" y=\"\(f(r.y))\" width=\"\(f(r.w))\" height=\"\(f(r.h))\" rx=\"9\" fill=\"\(LeafPalette.cardFill)\" stroke=\"\(pinned ? LeafPalette.ring : LeafPalette.cardStroke)\" stroke-width=\"\(pinned ? 2 : 0.6)\"/>"
         let b = at("branch"), t = at("tag"), rp = at("repo")
         s += "<text x=\"\(f(b.x))\" y=\"\(f(b.y + 12))\" font-size=\"12\" font-weight=\"600\" fill=\"\(ink)\">\(esc(fit(c.branch, b.w, 12)))</text>"
         s += "<rect x=\"\(f(t.x))\" y=\"\(f(t.y + 1))\" width=\"\(f(t.w))\" height=\"14\" rx=\"7\" fill=\"\(LeafPalette.dot(c.status))\" fill-opacity=\".2\"/>"
         s += "<text x=\"\(f(t.x + StripLayout.tagPadding))\" y=\"\(f(t.y + 11.5))\" font-size=\"10\" font-weight=\"500\" fill=\"\(LeafPalette.pillText(c.status))\">\(esc(fit(c.pill, t.w - 2 * StripLayout.tagPadding, 10)))</text>"
         s += "<text x=\"\(f(rp.x))\" y=\"\(f(rp.y + 12))\" font-size=\"11\" fill=\"\(soft)\">\(esc(fit(c.repo, rp.w, 11, medium: false)))</text>"
-        if pinned { let p = at("pinned"); s += "<text x=\"\(f(p.x + p.w))\" y=\"\(f(p.y + 12))\" text-anchor=\"end\" font-size=\"10\" fill=\"\(LeafPalette.ring)\">Pinned · Esc</text>" }
         let p = at("path")
         s += "<text x=\"\(f(p.x))\" y=\"\(f(p.y + 10))\" font-size=\"10\" font-family=\"'SF Mono', Menlo, 'DejaVu Sans Mono', monospace\" fill=\"\(soft)\">\(esc(clip(c.path, Int(p.w / 6.1))))</text>"
         let stats = [("Size", c.size), ("Changes", c.changes), ("Sync", c.sync), ("Last commit", c.lastCommit)]

@@ -52,13 +52,13 @@ final class StripIdleTests: XCTestCase, @unchecked Sendable {
     func testNoOverlapAtAnyLength() {
         let slot = Rect(x: 16, y: 470, w: PopoverLayout.mapWidth, h: PopoverLayout.stripHeight)
         let lengths = [0, 1, 5, 20, 60, 300]
-        for bl in lengths { for rl in lengths { for tl in [0, 5, 40] { for pin in [false, true] {
+        for bl in lengths { for rl in lengths { for tl in [0, 5, 40] { do {
             let f = StripLayout.frames(in: slot, branch: String(repeating: "W", count: bl), tag: String(repeating: "M", count: tl),
-                                       repo: String(repeating: "m", count: rl), pinned: pin)
-            XCTAssertEqual(StripLayout.overlaps(f, in: slot), 0, "branch \(bl) repo \(rl) tag \(tl) pinned \(pin)")
+                                       repo: String(repeating: "m", count: rl))
+            XCTAssertEqual(StripLayout.overlaps(f, in: slot), 0, "branch \(bl) repo \(rl) tag \(tl)")
         } } } }
         // Short strings keep their natural width; long ones are cut to the frame.
-        let short = StripLayout.title(branch: "b", tag: "Clean", repo: "r", pinned: false)
+        let short = StripLayout.title(branch: "b", tag: "Clean", repo: "r")
         XCTAssertEqual(short[0].rect.w, LeafText.width("b", size: 12), accuracy: 0.01)
         XCTAssertEqual(LeafSVG.fit(String(repeating: "W", count: 300), 100, 12).last, "…")
         XCTAssertLessThanOrEqual(LeafText.width(LeafSVG.fit(String(repeating: "W", count: 300), 100, 12), size: 12), 100)
@@ -74,7 +74,7 @@ final class StripIdleTests: XCTestCase, @unchecked Sendable {
     func testLayoutCasesCoverEveryLeafAndExtremes() {
         let (r, map) = busy()
         let cases = LayoutCase.all(r, map: map, now: LeafSample.now)
-        XCTAssertEqual(cases.count, (map.leaves.count + 6) * 2)
+        XCTAssertEqual(cases.count, map.leaves.count + 6)
         XCTAssertEqual(cases.map(\.overlaps).reduce(0, +), 0, cases.filter { $0.overlaps > 0 }.map(\.name).joined(separator: ", "))
     }
 
@@ -94,9 +94,11 @@ final class StripIdleTests: XCTestCase, @unchecked Sendable {
     func testSlotIsNeverEmpty() {
         let (r, map) = busy()
         let idle = LeafSVG.popover(r, map: map, now: LeafSample.now)
-        XCTAssertTrue(idle.contains(" free</text>") && idle.contains("Merged / stale"), "legend and storage bar at rest")
+        XCTAssertTrue(idle.contains(" free</text>") && idle.contains(">Ready (") && idle.contains(">Worktrees<"),
+                      "legend, storage bar and summary grid at rest")
         let pinned = LeafSVG.popover(r, map: map, hover: nil, pinned: map.leaves[0].item.id, now: LeafSample.now)
-        XCTAssertTrue(pinned.contains("Pinned · Esc") && pinned.contains("Remove worktree"))
+        XCTAssertTrue(!pinned.contains("Pinned") && pinned.contains("Remove worktree") && pinned.contains("stroke-width=\"2.0\""),
+                      "D25: selection is styling (2 pt outline), no Pinned label")
         XCTAssertTrue(pinned.contains(">Rescan<") && pinned.contains(">List<"), "footer buttons stay while pinned")
     }
 
@@ -130,6 +132,6 @@ final class StripIdleTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(rep.idleStripViolations + rep.mapFrameShifts + rep.stripLayoutShifts, 0, rep.summary)
         XCTAssertEqual(rep.slotFrameShifts + rep.footerHiddenFrames + rep.overlaps, 0, rep.summary)
         XCTAssertGreaterThan(rep.frames.filter { $0.pinned != nil && $0.footerButtons?.count == 5 }.count, 0)
-        XCTAssertEqual(rep.reachFailures + rep.mismatches + rep.stripMismatches + rep.tooltipClipped, 0, rep.summary)
+        XCTAssertEqual(rep.reachFailures + rep.mismatches + rep.stripMismatches, 0, rep.summary)
     }
 }

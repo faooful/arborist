@@ -4,9 +4,10 @@ import ArboristCleanup
 import ArboristCore
 import SwiftUI
 
-/// D24: the one shared slot below the map, a fixed 448 × stripHeight. At rest it shows `content` (legend and
-/// storage bar); on hover or pin the leaf details crossfade in (0.2 s, none with Reduce Motion) in the same
-/// rect. Never empty, never resized. Its own view so pointer moves don't re-render the whole popover.
+/// D24/D25: the one shared slot below the map, a fixed 448 × stripHeight. At rest it shows `content` (the
+/// RestPanel: legend, storage bar, summary grid); on hover or selection the leaf details crossfade in (0.2 s,
+/// none with Reduce Motion) in the same rect. Leaf → leaf only the values swap (PanelTransition). Never
+/// empty, never resized. Its own view so pointer moves don't re-render the whole popover.
 struct SharedSlot<Content: View>: View {
     @EnvironmentObject var hover: HoverModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -16,8 +17,7 @@ struct SharedSlot<Content: View>: View {
     var body: some View {
         let shown = result != nil && hover.visible.strip.flatMap { id in result.flatMap { WorktreeList.find($0, path: id) } } != nil
         ZStack(alignment: .topLeading) {
-            VStack(alignment: .leading, spacing: 10) { content }
-                .padding(.top, StripLayout.padding)
+            ZStack(alignment: .topLeading) { content }
                 .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.stripHeight, alignment: .topLeading)
                 .opacity(shown ? 0 : 1)
                 .allowsHitTesting(!shown)
@@ -25,9 +25,11 @@ struct SharedSlot<Content: View>: View {
             if let r = result { DetailStrip(result: r) }
         }
         .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.stripHeight, alignment: .topLeading)
-        .animation(reduceMotion || hover.instant ? nil : .easeInOut(duration: PopoverLayout.stripFade), value: shown)
+        .animation(hover.panelTransition == .crossfade && !hover.instant ? .easeInOut(duration: PopoverLayout.stripFade) : nil, value: shown)
         .reportFrame(SlotFrameKey.self)
         .onPreferenceChange(SlotFrameKey.self) { hover.drawnSlotFrame = $0.first }
+        .onPreferenceChange(RestFramesKey.self) { hover.drawnRestFrames = $0.isEmpty ? nil : $0 }
+        .onPreferenceChange(LegendKey.self) { hover.drawnLegend = $0.isEmpty ? nil : $0 }
     }
 }
 
@@ -36,6 +38,29 @@ struct SlotFrameKey: PreferenceKey {
     static let defaultValue: [Rect] = []
     static func reduce(value: inout [Rect], nextValue: () -> [Rect]) { value += nextValue() }
 }
+/// D25: the resting panel's content frames and legend measures as drawn, for the sweep.
+struct RestFramesKey: PreferenceKey {
+    static let defaultValue: [Rect] = []
+    static func reduce(value: inout [Rect], nextValue: () -> [Rect]) { value += nextValue() }
+}
+struct LegendKey: PreferenceKey {
+    static let defaultValue: [LegendMeasure] = []
+    static func reduce(value: inout [LegendMeasure], nextValue: () -> [LegendMeasure]) { value += nextValue() }
+}
+struct NaturalWidthKey: PreferenceKey {
+    static let defaultValue: Double = 0
+    static func reduce(value: inout Double, nextValue: () -> Double) { value = max(value, nextValue()) }
+}
+
+extension View {
+    /// D25: a fixed RestLayout frame (slot-relative), reported to the sweep as drawn.
+    func restFrame(_ r: Rect, alignment: Alignment = .topLeading) -> some View {
+        frame(width: r.w, height: r.h, alignment: alignment)
+            .reportFrame(RestFramesKey.self)
+            .padding(EdgeInsets(top: r.y, leading: r.x, bottom: 0, trailing: 0))
+    }
+}
+
 struct FooterFramesKey: PreferenceKey {
     static let defaultValue: [Rect] = []
     static func reduce(value: inout [Rect], nextValue: () -> [Rect]) { value += nextValue() }
@@ -112,8 +137,7 @@ struct PopoverView: View {
             // D24: one shared slot (legend + storage bar at rest, leaf details on hover or pin), then the
             // footer buttons in their own row, so a pin never hides them. Fixed heights: the map never moves.
             SharedSlot(result: model.leafMap != nil && !model.filterHidesEverything && !model.nothingMatches ? model.result : nil) {
-                HStack { Key(); Spacer(minLength: 4); Text(model.result.flatMap { Format.cachesTotal($0.caches) } ?? "").font(.system(size: 11)).foregroundColor(Theme.ink2).lineLimit(1).layoutPriority(-1) }
-                FreeBar(free: model.freeBytes ?? 0, total: model.result?.volume?.totalBytes ?? 0)
+                RestPanel()
             }
             HStack(spacing: 8) {
                 let n = model.clearPlan.count
@@ -155,11 +179,7 @@ struct PopoverView: View {
         .fixedSize(horizontal: false, vertical: true) // height = the content's ideal height, never squeezed
         .background(Theme.paper)
         .coordinateSpace(name: PopoverCoords.name)
-        // D22: the tooltip sits above everything, placed against the whole popover; it never takes hit-testing.
-        .overlay(alignment: .topLeading) {
-            if let r = model.result, !model.filterHidesEverything, !model.nothingMatches { TooltipOverlay(result: r) }
-        }
-        // Esc unpins (D22). A hidden cancel button, since the map itself rarely has key focus in the popover.
+        // Esc clears the selection (D22, D25). A hidden cancel button, since the map itself rarely has key focus in the popover.
         .background {
             Button("") { model.hover.unpin() }.keyboardShortcut(.cancelAction).opacity(0).allowsHitTesting(false)
                 .accessibilityHidden(true)
@@ -188,31 +208,71 @@ struct PopoverView: View {
 /// One legend line, three dots (D13).
 /// The legend, as state filters (D21): click toggles a state, ⌥-click shows only it, inactive items are dimmed.
 /// "Ready to clean (N)" is exactly Clear N's set (CleanupSafety). "Show all" appears when any are off.
+/// D25: the resting panel, never blank: legend, storage bar and labels, and a 2 × 4 summary grid of real
+/// values (shown scan), every piece in its RestLayout frame (the CLI's SVG draws the same frames).
+struct RestPanel: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        let free = model.freeBytes ?? 0, total = model.result?.volume?.totalBytes ?? 0
+        let cells = model.result.map(RestSummary.cells) ?? []
+        ZStack(alignment: .topLeading) {
+            Key()
+            GeometryReader { g in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Theme.line)
+                    Capsule().fill(Color(hex: LeafPalette.barFill))
+                        .frame(width: total > 0 ? g.size.width * (1 - Double(free) / Double(total)) : 0)
+                }
+            }
+            .restFrame(RestLayout.row("bar"))
+            HStack {
+                Text(Format.bytes(free)).fontWeight(.medium).foregroundColor(Theme.ink) + Text(" free").foregroundColor(Theme.ink2)
+                Spacer()
+                Text("of \(Format.bytes(total))").foregroundColor(Theme.ink2)
+            }
+            .font(.system(size: 11)).lineLimit(1)
+            .restFrame(RestLayout.row("storage"))
+            ForEach(Array(zip(RestLayout.cells, cells).enumerated()), id: \.offset) { _, pair in
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(pair.1.label).font(.system(size: 10)).foregroundColor(Theme.ink2).lineLimit(1)
+                    Text(pair.1.value).font(.system(size: 11.5, weight: .medium).monospacedDigit()).foregroundColor(Theme.ink).lineLimit(1)
+                }
+                .restFrame(pair.0)
+            }
+        }
+        .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.stripHeight, alignment: .topLeading)
+    }
+}
+
+/// The legend (D21, D25): state filters on one row, each item in its RestLayout frame. Caches moved to the
+/// summary grid so the row fits; each label's natural width is reported against its frame (sweep).
 struct Key: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let s = model.states
-        HStack(spacing: 9) {
-            ForEach(StateKey.allCases, id: \.self) { k in
-                Button { tap(k) } label: {
+        let items = RestLayout.legend(RestLayout.legendLabels(ready: readyCount, showAll: !s.isAll))
+        ZStack(alignment: .topLeading) {
+            ForEach(Array(items.enumerated()), id: \.offset) { i, item in
+                let k: StateKey? = i < StateKey.allCases.count ? StateKey.allCases[i] : nil
+                Button { if let k { tap(k) } else { set(.all) } } label: {
                     HStack(spacing: 4) {
-                        dot(k)
-                        Text(k == .ready ? "\(short(k)) (\(readyCount))" : short(k))
-                            .fontWeight(s.isActive(k) && !s.isAll ? .semibold : .regular)
+                        if let k { dot(k) } else { Color.clear.frame(width: 8, height: 8) }
+                        LegendLabel(text: item.label, bold: k.map { s.isActive($0) && !s.isAll } ?? false,
+                                    frame: item.text)
                     }
-                    .padding(.horizontal, 4).padding(.vertical, 2)
-                    .background(RoundedRectangle(cornerRadius: 4).fill(s.isActive(k) && !s.isAll ? Theme.line : Color.clear))
-                    .opacity(s.isAll || s.isActive(k) ? 1 : 0.45)
+                    .padding(.horizontal, 4)
+                    .frame(width: item.item.w, height: item.item.h, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(k.map { s.isActive($0) && !s.isAll } ?? false ? Theme.line : Color.clear))
+                    .opacity(k.map { s.isAll || s.isActive($0) } ?? true ? 1 : 0.45)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(HoverButtonStyle(kind: .link, height: nil))
-                .help(k == .ready ? "Exactly what Clear would remove. ⌥-click: only this." : "\(k.title). Click to toggle, ⌥-click: only this.")
-                .accessibilityLabel("\(k.title)\(k == .ready ? ", \(readyCount)" : ""), \(s.isActive(k) ? "shown" : "hidden")")
-            }
-            if !s.isAll {
-                Button("Show all") { set(.all) }.buttonStyle(HoverButtonStyle(kind: .link, height: nil))
+                .help(k.map { $0 == .ready ? "Exactly what Clear would remove. ⌥-click: only this." : "\($0.title). Click to toggle, ⌥-click: only this." } ?? "Show every state")
+                .accessibilityLabel(k.map { "\($0.title)\($0 == .ready ? ", \(readyCount)" : ""), \(s.isActive($0) ? "shown" : "hidden")" } ?? "Show all")
+                .restFrame(item.item)
             }
         }
         .font(.system(size: 11)).foregroundColor(Theme.ink2)
@@ -245,23 +305,21 @@ struct Key: View {
     }
 }
 
-struct FreeBar: View {
-    let free: Int64, total: Int64
+/// D25: one legend label in its text frame; reports its natural (untruncated) width against the frame.
+struct LegendLabel: View {
+    let text: String, bold: Bool, frame: Rect
+    @State private var natural = 0.0
     var body: some View {
-        VStack(spacing: 5) {
-            GeometryReader { g in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Theme.line)
-                    Capsule().fill(Color(hex: LeafPalette.barFill))
-                        .frame(width: total > 0 ? g.size.width * (1 - Double(free) / Double(total)) : 0)
-                }
-            }.frame(height: 6)
-            HStack {
-                Text(Format.bytes(free)).fontWeight(.medium).foregroundColor(Theme.ink) + Text(" free").foregroundColor(Theme.ink2)
-                Spacer()
-                Text("of \(Format.bytes(total))").foregroundColor(Theme.ink2)
-            }.font(.system(size: 11))
-        }
+        Text(text).fontWeight(bold ? .semibold : .regular).lineLimit(1)
+            .frame(width: frame.w, alignment: .leading)
+            .background(Text(text).fontWeight(bold ? .semibold : .regular).fixedSize().hidden()
+                .background(GeometryReader { g in Color.clear.preference(key: NaturalWidthKey.self, value: g.size.width) }))
+            .onPreferenceChange(NaturalWidthKey.self) { natural = $0 }
+            .background(GeometryReader { g in
+                let f = g.frame(in: .named(PopoverCoords.name))
+                Color.clear.preference(key: LegendKey.self,
+                                       value: [LegendMeasure(label: text, natural: natural, frame: Rect(x: f.minX, y: f.minY, w: f.width, h: f.height))])
+            })
     }
 }
 

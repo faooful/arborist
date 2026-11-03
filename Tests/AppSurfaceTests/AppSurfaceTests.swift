@@ -22,13 +22,10 @@ final class AppSurfaceTests: XCTestCase, @unchecked Sendable {
         var tracker = HoverTracker()
         _ = tracker.pointer(leaf.item.id, at: 0); _ = tracker.settle(at: 1)
         _ = (tracker.strip, tracker.hovered, tracker.clearAt, HoverTracker.leaveDelay, HoverTracker.duration(reduceMotion: true))
-        // D15/D22: HoverModel / MouseTracking / the sweep runner / the strip and tooltip.
-        tracker.tooltipSize = TooltipPlacement.size
+        // D15/D22/D25: HoverModel / MouseTracking / the sweep runner / the panel (no tooltip).
         _ = tracker.move(to: Pt(1, 1), in: map, at: 2); tracker.exit(at: 3); _ = tracker.click(at: Pt(1, 1), in: map); tracker.unpin(); tracker.reset()
         let v: HoverTracker.Visible = tracker.visible
-        _ = (v.hovered, v.pinned, v.strip, v.tooltipOrigin, tracker.tooltipOrigin, tracker.tooltipRect, tracker.pinned, tracker.appearance(of: "x").ring)
-        let tip = LeafTooltip(card)
-        _ = (tip.branch, tip.repo, tip.size, TooltipPlacement.size.x, TooltipPlacement.place(pointer: Pt(1, 1), in: Pt(480, 600)))
+        _ = (v.hovered, v.pinned, v.strip, tracker.pinned, tracker.appearance(of: "x").ring)
         _ = (StripLayout.padding, StripLayout.row, StripLayout.buttons.indices, StripLayout.buttons[0].name, StripLayout.buttons[0].x, StripLayout.buttons[0].w)
         _ = (PopoverLayout.stripHeight, PopoverLayout.stripGap, PopoverLayout.footerHeight, PopoverLayout.stripFade, StripLayout.rows.count, StripLayout.columns, StripLayout.frames(in: Rect(x: 0, y: 0, w: 1, h: 1)), LeafPalette.ring, LeafPalette.ringHover, LeafPalette.ringPinned)
         _ = (LeafMap.hitRadius, map.hit(at: Pt(1, 1)))
@@ -74,12 +71,20 @@ final class AppSurfaceTests: XCTestCase, @unchecked Sendable {
         let (steps, pin) = HoverSweep.steps(map, space: sp)
         for s in steps { switch s { case .move(let p), .click(let p): _ = (p, HoverSweep.onMap(p, map)); case .leave, .escape: break } }
         _ = (PopoverLayout.height, PopoverLayout.headerHeight, PopoverLayout.footerRowHeight, FooterLayout.names, sp.footerRect,
-             StripLayout.named(in: sp.stripRect, branch: "", tag: "", repo: "", pinned: true), StripLayout.fixedPart([]),
+             StripLayout.named(in: sp.stripRect, branch: "", tag: "", repo: ""), StripLayout.fixedPart([]),
              rep.slotFrameShifts, rep.footerHiddenFrames, rep.overlaps, LayoutCase.all(LeafSample.busy, map: map),
              HoverSweep.Drawn(mapFrame: Rect(x: 0, y: 0, w: 1, h: 1), stripHeight: 0, stripFrames: nil, slotFrame: nil, footerButtons: nil))
-        _ = (pin, rep.stripMismatches, rep.tooltipClipped, rep.reachFailures, rep.buttonHits, rep.idleStripViolations, rep.mapFrameShifts, rep.stripLayoutShifts)
+        _ = (pin, rep.stripMismatches, rep.reachFailures, rep.buttonHits, rep.idleStripViolations, rep.mapFrameShifts, rep.stripLayoutShifts)
         _ = (PopoverAction.allCases, PopoverActionOutcome.fired(.list).log, SettingsOpening.steps(osMajor: 14),
              SettingsOpening.shouldBecomeAccessory(otherVisibleWindows: 0))
+        // D25: the resting panel, legend fit and panel transitions.
+        _ = (RestLayout.row("legend"), RestLayout.cells, RestLayout.legend(RestLayout.legendLabels(ready: 1, showAll: true)),
+             RestLayout.frames(in: sp.stripRect, legend: []), RestLayout.emptyGap([], in: sp.stripRect), RestLayout.maxEmptyGap,
+             RestSummary.cells(LeafSample.busy), PanelTransition.between(nil, "a", reduceMotion: false),
+             LegendMeasure(label: "", natural: 0, frame: Rect(x: 0, y: 0, w: 0, h: 0)).truncated(rowRight: 0),
+             HoverSweep.Drawn(mapFrame: Rect(x: 0, y: 0, w: 1, h: 1), stripHeight: 0, stripFrames: nil, slotFrame: nil, footerButtons: nil,
+                              restFrames: [], legend: [], transition: .none),
+             rep.idleEmptyGapViolations, rep.legendTruncations, rep.hoverTransitions)
         for st in SettingsOpening.steps(osMajor: 13) {
             switch st { case .becomeRegular, .activate, .openSettingsAction, .showSettingsSelector, .orderFront, .fallbackWindow: break }
         }
