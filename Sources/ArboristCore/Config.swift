@@ -9,15 +9,18 @@ public struct ArboristConfig: Codable, Equatable, Sendable {
     public var leafStages: StageMultipliers
     /// Show the free-space text next to the menu bar leaf.
     public var showFreeText: Bool
+    /// Seconds before the app gives up on a scan and shows an error with Retry (D11).
+    public var scanTimeoutSeconds: Double
 
     public static var home: String { FileManager.default.homeDirectoryForCurrentUser.path }
     public static var defaults: ArboristConfig {
         ArboristConfig(roots: ["~", "~/Documents"], lowSpaceThresholdGB: 20, maxDepth: 4)
     }
     public init(roots: [String], lowSpaceThresholdGB: Double, maxDepth: Int,
-                leafStages: StageMultipliers = .default, showFreeText: Bool = true) {
+                leafStages: StageMultipliers = .default, showFreeText: Bool = true, scanTimeoutSeconds: Double = 180) {
         self.roots = roots; self.lowSpaceThresholdGB = lowSpaceThresholdGB; self.maxDepth = maxDepth
         self.leafStages = leafStages; self.showFreeText = showFreeText
+        self.scanTimeoutSeconds = scanTimeoutSeconds
     }
 
     /// Missing keys fall back to defaults, so older or hand-written config files keep working.
@@ -29,6 +32,7 @@ public struct ArboristConfig: Codable, Equatable, Sendable {
         maxDepth = try c.decodeIfPresent(Int.self, forKey: .maxDepth) ?? d.maxDepth
         leafStages = try c.decodeIfPresent(StageMultipliers.self, forKey: .leafStages) ?? d.leafStages
         showFreeText = try c.decodeIfPresent(Bool.self, forKey: .showFreeText) ?? d.showFreeText
+        scanTimeoutSeconds = try c.decodeIfPresent(Double.self, forKey: .scanTimeoutSeconds) ?? d.scanTimeoutSeconds
     }
 
     public func stage(freeBytes: Int64) -> LeafStage {

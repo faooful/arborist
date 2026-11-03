@@ -19,4 +19,5 @@ scripts/make-app.sh && open Arborist.app
 scripts/render-shots.sh                     # PNG snapshots (needs Chrome)    # bundled menu bar app (LSUIElement)
 ```
 
-Scan roots, depth, the alert threshold, the leaf stage multipliers (`leafStages`) and `showFreeText` live in `~/.config/arborist/config.json` (shared by the CLI and the app). Defaults: `~` and `~/Documents`, depth 4, 20 GB.
+Scan roots, depth, the alert threshold, the leaf stage multipliers (`leafStages`), `showFreeText` and `scanTimeoutSeconds` (default 180) live in `~/.config/arborist/config.json` (shared by the CLI and the app). Defaults: `~` and `~/Documents`, depth 4, 20 GB.
+The app caches its last scan in `~/Library/Caches/arborist/last-scan.json` (`~/.cache/arborist` on Linux) and shows it on launch while a fresh scan runs.

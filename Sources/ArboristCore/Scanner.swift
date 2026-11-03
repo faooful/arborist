@@ -1,7 +1,7 @@
 import Foundation
 
 /// Read-only scanner. Never deletes, moves, or writes anything inside scanned folders.
-public final class Scanner {
+public final class Scanner: Sendable {
     public let config: ArboristConfig
     public init(config: ArboristConfig = .load()) { self.config = config }
 
@@ -9,8 +9,18 @@ public final class Scanner {
     /// they are huge, rarely hold repos, or trigger macOS privacy prompts.
     static let skipUnderHome: Set<String> = ["Library", "Applications", "Pictures", "Movies", "Music", "Desktop", "Downloads", "Public"]
 
-    public func scan() -> ScanResult {
+    /// Blocking full scan. Same result as before progress events existed; the CLI uses this.
+    public func scan() -> ScanResult { scan(cancel: nil) { _ in } }
+
+    /// Blocking scan that reports progress as it goes (D11):
+    /// `.volume` first (free space, instant), `.discovered(n)` once repos are found, `.repo` as each
+    /// repo's worktrees are all measured (in completion order), `.caches`, then `.finished`.
+    /// `onEvent` is called from worker threads. When `cancel` is set, workers stop early and the
+    /// partial result is returned (callers that timed out ignore it).
+    public func scan(cancel: CancelFlag?, onEvent: @escaping @Sendable (ScanEvent) -> Void) -> ScanResult {
         let roots = config.expandedRoots
+        let volume = DiskUsage.volume(for: ArboristConfig.home)
+        onEvent(.volume(volume))
         var skipped = 0
         let repoRoots = discoverRepos(roots: roots, skipped: &skipped)
 
@@ -18,45 +28,78 @@ public final class Scanner {
         var seen = Set<String>()
         var pending: [(name: String, path: String, def: String?, wts: [PorcelainWorktree])] = []
         for dir in repoRoots {
+            if cancel?.isCancelled == true { break }
             guard let text = Shell.git(dir, "worktree", "list", "--porcelain") else { continue }
             let wts = GitParsing.parseWorktreeList(text).filter { !$0.bare }
             guard let main = wts.first, !seen.contains(main.path) else { continue }
             seen.insert(main.path)
             pending.append((URL(fileURLWithPath: main.path).lastPathComponent, main.path, defaultBranch(main.path), wts))
         }
+        onEvent(.discovered(repos: pending.count))
 
-        // Measure every worktree in parallel.
+        // Measure every worktree in parallel; a repo is published when its last worktree finishes.
         let flat = pending.enumerated().flatMap { (ri, r) in r.wts.enumerated().map { (ri, $0.offset, $0.element) } }
         let jobs = pending
-        let out = Collector(count: flat.count)
+        let out = Collector(count: flat.count, perRepo: pending.map { $0.wts.count })
+        let shells = pending.map { Repo(name: $0.name, path: $0.path, defaultBranch: $0.def, worktrees: []) }
         // Bounded parallelism keeps open pipes and disk thrash in check.
         let queue = OperationQueue()
         queue.maxConcurrentOperationCount = 4
         for i in flat.indices {
             let (ri, wi, p) = flat[i]
             queue.addOperation {
+                if cancel?.isCancelled == true { return }
                 var s = 0
-                let wt = self.inspect(p, isMain: wi == 0, repoPath: jobs[ri].path, defaultBranch: jobs[ri].def, skipped: &s)
-                out.set(i, wt, skipped: s)
+                let wt = self.inspect(p, isMain: wi == 0, repoPath: jobs[ri].path, defaultBranch: jobs[ri].def,
+                                      skipped: &s, cancel: cancel)
+                if let (wts, done) = out.set(i, repo: ri, wt, skipped: s) {
+                    var repo = shells[ri]
+                    repo.worktrees = Self.ordered(wts)
+                    onEvent(.repo(repo, done: done, total: shells.count))
+                }
             }
         }
         queue.waitUntilAllOperationsAreFinished()
-        let results = out.results
-        let extraSkipped = out.skipped
-        skipped += extraSkipped.reduce(0, +)
+        skipped += out.skipped.reduce(0, +)
 
-        var repos: [Repo] = pending.map { Repo(name: $0.name, path: $0.path, defaultBranch: $0.def, worktrees: []) }
-        for (i, item) in flat.enumerated() { if let w = results[i] { repos[item.0].worktrees.append(w) } }
-        for i in repos.indices {
-            let main = repos[i].worktrees.first { $0.isMain }
-            let rest = repos[i].worktrees.filter { !$0.isMain }.sorted { $0.size.total > $1.size.total }
-            repos[i].worktrees = (main.map { [$0] } ?? []) + rest
-        }
+        var repos = shells
+        for (i, item) in flat.enumerated() { if let w = out.results[i] { repos[item.0].worktrees.append(w) } }
+        for i in repos.indices { repos[i].worktrees = Self.ordered(repos[i].worktrees) }
         repos.sort { $0.size.total > $1.size.total }
 
-        let caches = Caches.scan(home: ArboristConfig.home, skipped: &skipped)
-        return ScanResult(scannedAt: Date(), roots: roots, volume: DiskUsage.volume(for: ArboristConfig.home),
-                          repos: repos, caches: caches, skippedPaths: skipped)
+        let caches = cancel?.isCancelled == true ? [] : Caches.scan(home: ArboristConfig.home, skipped: &skipped, cancel: cancel)
+        onEvent(.caches(caches))
+        let result = ScanResult(scannedAt: Date(), roots: roots, volume: volume,
+                                repos: repos, caches: caches, skippedPaths: skipped)
+        onEvent(.finished(result))
+        return result
+    }
+
+    /// Async scan with a deadline. Events arrive on the stream returned by `events(timeout:)`, or
+    /// via `onEvent`. Throws `ScanError.timedOut` if the scan doesn't finish in `timeout` seconds;
+    /// the worker is told to stop and its late result is dropped.
+    public func scan(timeout: TimeInterval, onEvent: @escaping @Sendable (ScanEvent) -> Void = { _ in }) async throws -> ScanResult {
+        try await Deadline.run(timeout: timeout) { cancel in
+            self.scan(cancel: cancel) { e in if !cancel.isCancelled { onEvent(e) } }
+        }
+    }
+
+    /// Progress as an AsyncStream. Ends after `.finished`, or with a `.failed` event on timeout.
+    public func events(timeout: TimeInterval) -> AsyncStream<ScanEvent> {
+        AsyncStream { cont in
+            let task = Task {
+                do { _ = try await self.scan(timeout: timeout) { cont.yield($0) } }
+                catch { cont.yield(.failed(ScanError.describe(error))) }
+                cont.finish()
+            }
+            cont.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    static func ordered(_ wts: [Worktree]) -> [Worktree] {
+        let main = wts.first { $0.isMain }
+        let rest = wts.filter { !$0.isMain }.sorted { $0.size.total > $1.size.total }
+        return (main.map { [$0] } ?? []) + rest
     }
 
     /// Walks roots to `maxDepth`, returning folders containing `.git` (a dir for repos, a file for linked worktrees).
@@ -91,7 +134,7 @@ public final class Scanner {
         return nil
     }
 
-    func inspect(_ p: PorcelainWorktree, isMain: Bool, repoPath: String, defaultBranch: String?, skipped: inout Int) -> Worktree {
+    func inspect(_ p: PorcelainWorktree, isMain: Bool, repoPath: String, defaultBranch: String?, skipped: inout Int, cancel: CancelFlag? = nil) -> Worktree {
         var w = Worktree(path: p.path, isMain: isMain, branch: p.detached ? nil : p.branch, head: p.head,
                          lastCommitDate: nil, dirty: false, unpushedCommits: nil, hasUpstream: false,
                          stale: false, staleReasons: [], size: SizeSplit(),
@@ -128,16 +171,31 @@ public final class Scanner {
         w.staleReasons = GitParsing.staleReasons(branch: w.branch, defaultBranch: defaultBranch, isMain: isMain,
                                                  mergedIntoDefault: merged, upstreamGone: upstreamGone, prunable: false)
         w.stale = !w.staleReasons.isEmpty
-        w.size = DiskUsage.measureWorktree(p.path, skipped: &skipped)
+        w.size = DiskUsage.measureWorktree(p.path, skipped: &skipped, cancel: cancel)
         return w
     }
 }
 
-/// Thread-safe slots for parallel worktree results.
+/// Thread-safe slots for parallel worktree results, plus per-repo completion tracking.
 final class Collector: @unchecked Sendable {
     private let lock = NSLock()
     private(set) var results: [Worktree?]
     private(set) var skipped: [Int]
-    init(count: Int) { results = Array(repeating: nil, count: count); skipped = Array(repeating: 0, count: count) }
-    func set(_ i: Int, _ w: Worktree, skipped s: Int) { lock.lock(); results[i] = w; skipped[i] = s; lock.unlock() }
+    private var remaining: [Int]
+    private var byRepo: [[Worktree]]
+    private var reposDone = 0
+    init(count: Int, perRepo: [Int]) {
+        results = Array(repeating: nil, count: count); skipped = Array(repeating: 0, count: count)
+        remaining = perRepo; byRepo = perRepo.map { _ in [] }
+    }
+    /// Stores one result; returns the repo's worktrees and the done count when this was its last one.
+    func set(_ i: Int, repo: Int, _ w: Worktree, skipped s: Int) -> ([Worktree], Int)? {
+        lock.lock(); defer { lock.unlock() }
+        results[i] = w; skipped[i] = s
+        byRepo[repo].append(w)
+        remaining[repo] -= 1
+        guard remaining[repo] == 0 else { return nil }
+        reposDone += 1
+        return (byRepo[repo], reposDone)
+    }
 }

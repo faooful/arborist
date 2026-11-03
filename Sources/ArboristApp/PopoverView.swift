@@ -16,12 +16,23 @@ struct PopoverView: View {
                 Text(bigNumber).font(.system(size: 30, weight: .light)).foregroundColor(Theme.ink)
                 Text("GB free").font(.system(size: 13)).foregroundColor(Theme.ink2)
                 Spacer()
-                Text(model.scanning ? "Scanning…" : "Arborist").font(.system(size: 11.5)).foregroundColor(Theme.ink2)
+                Text(statusText).font(.system(size: 11.5)).foregroundColor(Theme.ink2)
+                    .accessibilityLabel(statusText)
+            }
+            if let err = model.scanError {
+                HStack(spacing: 8) {
+                    Text(err + (model.result != nil ? " Showing the last results." : ""))
+                        .font(.system(size: 11)).foregroundColor(Theme.ink)
+                    Spacer()
+                    Button("Retry") { model.rescan() }.font(.system(size: 11))
+                }
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color(hex: LeafPalette.fill(.stale)).opacity(0.35)))
             }
             if let map = model.leafMap {
                 LeafMapView(map: map, freeBytes: model.freeBytes ?? 0, selection: $picked)
             } else {
-                Text(model.scanning ? "Looking for repositories and worktrees…" : "No scan yet")
+                Text(model.scanning ? "Looking for repositories and worktrees…" : (model.scanError == nil ? "No scan yet" : "No results"))
                     .font(.system(size: 11)).foregroundColor(Theme.ink2).frame(width: 448, height: 120)
             }
             if let item = picked, item.kind != .free { SelectedRow(item: item) }
@@ -54,6 +65,13 @@ struct PopoverView: View {
         .padding(16)
         .frame(width: 480)
         .background(Theme.paper)
+    }
+
+    /// "12/34 repos" while scanning, "Cached · refreshing" for a cached scan, else "Arborist".
+    private var statusText: String {
+        if let p = model.progressLabel { return model.resultIsCached ? "Cached · \(p)" : p }
+        if model.resultIsCached { return "Cached" }
+        return "Arborist"
     }
 
     private var bigNumber: String {
