@@ -55,6 +55,25 @@ public enum StripLayout {
         return buttons.map { ($0.name, Rect(x: strip.x + padding + $0.x, y: y, w: $0.w, h: row)) }
     }
     public static func button(at p: Pt, in strip: Rect) -> String? { buttons(in: strip).first { $0.rect.contains(p) }?.name }
+
+    /// D24: fixed text rows, relative to the strip's top-left. Only the values change between leaves; every
+    /// row is one line, truncated, never re-wrapped.
+    public static let rows: [(name: String, rect: Rect)] = [
+        ("title", Rect(x: padding, y: 8, w: PopoverLayout.mapWidth - 2 * padding, h: 16)),
+        ("path", Rect(x: padding, y: 26, w: PopoverLayout.mapWidth - 2 * padding, h: 14)),
+        ("stats", Rect(x: padding, y: 42, w: PopoverLayout.mapWidth - 2 * padding, h: 26)),
+        ("message", Rect(x: padding, y: 70, w: PopoverLayout.mapWidth - 2 * padding, h: 14)),
+    ]
+    public static func row(_ name: String) -> Rect { rows.first { $0.name == name }!.rect }
+    /// D24: the four stat columns (Size, Changes, Sync, Last commit), equal fixed widths.
+    public static var columns: [Rect] {
+        let r = row("stats"), w = r.w / 4
+        return (0..<4).map { Rect(x: r.x + Double($0) * w, y: r.y, w: w, h: r.h) }
+    }
+    /// D24: every text and button frame in the strip, in popover coordinates.
+    public static func frames(in strip: Rect) -> [Rect] {
+        (rows.map(\.rect) + columns).map { Rect(x: strip.x + $0.x, y: strip.y + $0.y, w: $0.w, h: $0.h) } + buttons(in: strip).map(\.rect)
+    }
 }
 
 /// D22: the tooltip's three facts.
@@ -210,6 +229,12 @@ public enum HoverSweep {
         public var buttonUnderPointer: String?
         /// End of the pin + reach-the-strip path: must be on a button with the pin held.
         public var reachTarget: Bool
+        /// D24: the strip's drawn height (0 at rest).
+        public var stripHeight: Double = 0
+        /// D24: the map's frame in popover coordinates, as drawn.
+        public var mapFrame: Rect?
+        /// D24: the strip's text and button frames as drawn (nil when hidden).
+        public var stripFrames: [Rect]?
 
         public init(frame: Int, x: Double, y: Double, viewX: Double? = nil, viewY: Double? = nil, t: Double,
                     hovered: String?, pinned: String? = nil, strip: String? = nil, underPointer: String? = nil,
@@ -232,6 +257,7 @@ public enum HoverSweep {
             try c.encode(snappedTo, forKey: .snappedTo); try c.encode(pinTruth, forKey: .pinTruth)
             try c.encode(tooltipRect, forKey: .tooltipRect); try c.encode(tooltipClipped, forKey: .tooltipClipped)
             try c.encode(buttonUnderPointer, forKey: .buttonUnderPointer); try c.encode(reachTarget, forKey: .reachTarget)
+            try c.encode(stripHeight, forKey: .stripHeight); try c.encode(mapFrame, forKey: .mapFrame); try c.encode(stripFrames, forKey: .stripFrames)
         }
 
         public var expected: String? { underPointer ?? snappedTo }
@@ -239,6 +265,8 @@ public enum HoverSweep {
         /// What the strip should show: the pinned leaf, else the expected hover.
         public var expectedStrip: String? { pinTruth ?? expected }
         public var isStripMismatch: Bool { expectedStrip != strip }
+        /// D24: the strip is shown exactly when it has a leaf, at its full height, and takes 0 at rest.
+        public var isIdleStripViolation: Bool { strip == nil ? stripHeight != 0 : stripHeight != PopoverLayout.stripHeight }
         public var isReachFailure: Bool { reachTarget && (buttonUnderPointer == nil || pinTruth == nil || strip != pinTruth || pinned != pinTruth) }
     }
 
@@ -259,6 +287,14 @@ public enum HoverSweep {
         /// D22: reach targets on a button with the pin held.
         public var buttonHits: Int
         public var tooltipFrames: Int
+        /// D24: frames where the strip has height at rest, or the wrong height when shown. Expected 0.
+        public var idleStripViolations: Int
+        /// D24: frames where the map frame differs from frame 0's (idle, hover, pin). Expected 0.
+        public var mapFrameShifts: Int
+        /// D24: shown-strip frames whose text/button frames differ from the first shown one's. Expected 0.
+        public var stripLayoutShifts: Int
+        public var idleFrames: Int
+        public var pinnedFrames: Int
 
         public init(_ frames: [Frame]) {
             self.frames = frames
@@ -272,6 +308,13 @@ public enum HoverSweep {
             reachFailures = frames.filter(\.isReachFailure).count + (frames.contains(where: \.reachTarget) ? 0 : 1)
             buttonHits = frames.filter { $0.reachTarget && !$0.isReachFailure }.count
             tooltipFrames = frames.filter { $0.tooltipRect != nil }.count
+            idleStripViolations = frames.filter(\.isIdleStripViolation).count
+            let map0 = frames.first?.mapFrame
+            mapFrameShifts = frames.filter { $0.mapFrame == nil || $0.mapFrame != map0 }.count
+            let shown = frames.compactMap(\.stripFrames)
+            stripLayoutShifts = shown.filter { $0 != shown.first }.count + frames.filter { $0.strip != nil && $0.stripFrames == nil }.count
+            idleFrames = frames.filter { $0.strip == nil }.count
+            pinnedFrames = frames.filter { $0.pinned != nil }.count
         }
 
         public init(from decoder: Decoder) throws {
@@ -283,7 +326,9 @@ public enum HoverSweep {
         public var summary: String {
             "\(frames.count) frames, \(hoveredCount) hovered, \(distinctHovered) distinct leaves, \(gapFrames) in gaps, \(tooltipFrames) with tooltip, "
                 + "\(mismatches) mismatches, \(stripMismatches) strip mismatches, \(tooltipClipped) clipped tooltips, "
-                + "\(reachFailures) reach failures, \(buttonHits) button hits"
+                + "\(reachFailures) reach failures, \(buttonHits) button hits, "
+                + "\(idleFrames) idle / \(pinnedFrames) pinned, \(idleStripViolations) idle-strip violations, "
+                + "\(mapFrameShifts) map frame shifts, \(stripLayoutShifts) strip layout shifts"
                 + (mismatches > 0 ? " (frames \(mismatchFrames.map(String.init).joined(separator: ", ")))" : "")
         }
     }
@@ -297,7 +342,7 @@ public enum HoverSweep {
     /// One frame from the tracker state after the pointer moved to `p` (map coordinates, nil = left the popover).
     public static func frame(_ i: Int, pointer p: Pt?, last: Pt, t: Double, tracker: HoverTracker,
                              map: LeafMap, transform: MapTransform = .identity,
-                             pinTruth: String? = nil, reachTarget: Bool = false) -> Frame {
+                             pinTruth: String? = nil, reachTarget: Bool = false, drawn: Drawn? = nil) -> Frame {
         let q = p ?? last
         let v = transform.toView(q)
         let onMap = p != nil && q.x >= 0 && q.y >= 0 && q.x <= map.width && q.y <= map.height
@@ -306,10 +351,22 @@ public enum HoverSweep {
         let rect = tracker.tooltipRect
         let clipped = rect.map { tracker.space?.clips($0) ?? !$0.inside(width: map.width, height: map.height) } ?? false
         let button = p.flatMap { pp in tracker.space.flatMap { s in StripLayout.button(at: s.toPopover(pp), in: s.stripRect) } }
-        return Frame(frame: i, x: q.x, y: q.y, viewX: v.x, viewY: v.y, t: t, hovered: tracker.hovered,
+        var fr = Frame(frame: i, x: q.x, y: q.y, viewX: v.x, viewY: v.y, t: t, hovered: tracker.hovered,
                      pinned: tracker.pinned, strip: tracker.strip, underPointer: truth, inGap: gap,
                      snappedTo: gap ? map.hit(at: q)?.item.id : nil, pinTruth: pinTruth, tooltipRect: rect,
                      tooltipClipped: clipped, buttonUnderPointer: button, reachTarget: reachTarget)
+        if let d = drawn { fr.stripHeight = d.stripHeight; fr.mapFrame = d.mapFrame; fr.stripFrames = d.stripFrames }
+        return fr
+    }
+
+    /// D24: what the renderer (SVG in the CLI, SwiftUI in the app) actually drew for a frame.
+    public struct Drawn: Equatable, Sendable {
+        public var mapFrame: Rect
+        public var stripHeight: Double
+        public var stripFrames: [Rect]?
+        public init(mapFrame: Rect, stripHeight: Double, stripFrames: [Rect]?) {
+            self.mapFrame = mapFrame; self.stripHeight = stripHeight; self.stripFrames = stripFrames
+        }
     }
 
     /// Serpentine across `rows` horizontal lines, then one point off the map and a settle after the grace.
@@ -332,6 +389,8 @@ public enum HoverSweep {
         case move(Pt)
         case click(Pt)
         case leave
+        /// D24: Esc (unpin).
+        case escape
     }
 
     /// D22: the pin + reach path: click the leaf to pin it, then move in `steps` frames from it to the strip's
@@ -351,9 +410,10 @@ public enum HoverSweep {
     /// The whole sweep: the serpentine, then (with a space) pin + reach, then leave.
     public static func steps(_ map: LeafMap, space: PopoverSpace?, rows: Int = 3, perRow: Int = 16) -> (steps: [Step], pinned: String?) {
         let serp = path(in: map, rows: rows, perRow: perRow)
-        var out: [Step] = serp.compactMap { $0 }.map { .move($0) }
+        // D24: one idle frame first (strip at rest), and Esc + leave at the end (back to rest).
+        var out: [Step] = [.leave] + serp.compactMap { $0 }.map { .move($0) }
         var pinned: String?
-        if let s = space, let r = pinAndReach(map, space: s) { out += r.steps; pinned = r.leaf }
+        if let s = space, let r = pinAndReach(map, space: s) { out += r.steps + [.escape]; pinned = r.leaf }
         out += [.leave, .leave]
         return (out, pinned)
     }
@@ -364,7 +424,8 @@ public enum HoverSweep {
 
     /// Runs the sweep through a tracker, the way the CLI does. `apply` sees the tracker and pointer after each step.
     public static func run(_ map: LeafMap, step: Double = 1.0 / 30, transform: MapTransform = .identity,
-                           space: PopoverSpace? = nil, rows: Int = 3, perRow: Int = 16, apply: (Int, HoverTracker, Pt?) -> Void = { _, _, _ in }) -> [Frame] {
+                           space: PopoverSpace? = nil, rows: Int = 3, perRow: Int = 16,
+                           apply: (Int, HoverTracker, Pt?) -> Drawn? = { _, _, _ in nil }) -> [Frame] {
         var tracker = HoverTracker()
         tracker.space = space
         let (steps, pinLeaf) = steps(map, space: space, rows: rows, perRow: perRow)
@@ -383,12 +444,14 @@ public enum HoverSweep {
                 pinTruth = pinTruth == nil ? pinLeaf : nil
             case .leave:
                 tracker.exit(at: t)
+            case .escape:
+                tracker.unpin(); pinTruth = nil
             }
             // Instant mode (D16): a pending clear is applied by jumping time past the grace.
             if let c = tracker.clearAt { t = max(t, c); tracker.settle(at: t) }
-            apply(i, tracker, p)
+            let drawn = apply(i, tracker, p)
             frames.append(frame(i, pointer: p, last: last, t: t, tracker: tracker, map: map, transform: transform,
-                                pinTruth: pinTruth, reachTarget: i == reachAt))
+                                pinTruth: pinTruth, reachTarget: i == reachAt, drawn: drawn))
             t += p == nil ? HoverTracker.leaveDelay + 0.01 : step
         }
         return frames
