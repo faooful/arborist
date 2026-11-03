@@ -56,6 +56,13 @@ final class AppSurfaceTests: XCTestCase {
              f.apply(result), f.label(result.repos), f.isEmpty(result.repos), f.isEverything(result.repos), f.selected(result.repos),
              f.pruned(to: result.repos), RepoFilter.only(names: ["x"], among: result.repos), RepoFilter.matching(result.repos, query: "a"))
         _ = Cleanup.plan(result, filter: f)
+        // D21: legend state filters.
+        var st = StateFilter.all; st.toggle(.clean); st.showAll(); st = .only(.ready)
+        _ = (st.isAll, st.isActive(.ready), st.readyOnly, st.hidden, st.includes(ref.worktree), StateFilter.parse("ready"), StateKey.allCases.map(\.title))
+        let vs = VisibleSet(repos: f, states: st)
+        _ = (vs.apply(result), vs.count(.ready, in: result), vs.nothingMatches(result), VisibleSet.atLaunch(), vs.repos, vs.states)
+        _ = (Cleanup.plan(result, visible: vs), CleanupSafety.isReady(ref.worktree), CleanupSafety.blocker(ref.worktree), StateKey.colour(ref.worktree))
+        _ = CardPlacement.place(leaf: Rect(x: 0, y: 0, w: 1, h: 1), size: LeafSVG.cardSlot, in: Pt(480, 560), current: nil, pointer: Pt(0, 0))
         // D19: the card above the popover.
         var sp = CardSpace(mapOrigin: Pt(16, 52), size: Pt(480, 560), transform: mt)
         sp.mapOrigin = Pt(0, 0); sp.size = Pt(1, 1); sp.transform = .identity
@@ -63,6 +70,6 @@ final class AppSurfaceTests: XCTestCase {
         _ = (CardPlacement.place(leaf: Rect(x: 0, y: 0, w: 1, h: 1), size: LeafSVG.cardSlot, in: Pt(480, 560), current: nil),
              CardPlacement.margin, CardPlacement.gap)
         tracker.space = sp; _ = tracker.space
-        _ = (rep.cardClipped, HoverSweep.run(map, path: path, transform: mt, space: sp) { _, _ in }.first.map { ($0.cardRect, $0.cardClipped) })
+        _ = (rep.cardClipped, rep.cardReachFailures, HoverSweep.run(map, path: path, transform: mt, space: sp) { _, _ in }.first.map { ($0.cardRect, $0.cardClipped) })
     }
 }

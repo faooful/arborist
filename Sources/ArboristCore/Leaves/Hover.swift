@@ -86,7 +86,8 @@ public struct HoverTracker: Equatable, Sendable {
     private mutating func show(_ leaf: Leaf, in map: LeafMap, pointer: Pt) {
         hovered = leaf.item.id; card = leaf.item.id
         if let s = space {
-            cardOrigin = CardPlacement.place(leaf: s.leafRect(leaf), size: cardSize, in: s.size, current: cardOrigin)
+            cardOrigin = CardPlacement.place(leaf: s.leafRect(leaf), size: cardSize, in: s.size, current: cardOrigin,
+                                             pointer: s.toPopover(pointer))
             return
         }
         let (x0, y0, x1, y1) = Geo.bbox(leaf.outline)
@@ -188,12 +189,15 @@ public enum HoverSweep {
         public var cardRect: Rect?
         /// The card is shown and not fully inside the popover (should never happen).
         public var cardClipped: Bool
+        /// D21: the shown card can't be reached: it is clipped, or it sits over the pointer (so the click that
+        /// pins it would land on the card instead of the leaf). Should never happen.
+        public var cardReachFailure: Bool
 
         public init(frame: Int, x: Double, y: Double, viewX: Double? = nil, viewY: Double? = nil, t: Double,
                     hovered: String?, cardShown: Bool, cardX: Double?, cardY: Double?,
                     underPointer: String? = nil, inGap: Bool = false, snappedTo: String? = nil,
-                    cardRect: Rect? = nil, cardClipped: Bool = false) {
-            self.cardRect = cardRect; self.cardClipped = cardClipped
+                    cardRect: Rect? = nil, cardClipped: Bool = false, cardReachFailure: Bool = false) {
+            self.cardRect = cardRect; self.cardClipped = cardClipped; self.cardReachFailure = cardReachFailure
             self.frame = frame; self.x = x; self.y = y; self.viewX = viewX ?? x; self.viewY = viewY ?? y; self.t = t
             self.hovered = hovered; self.cardShown = cardShown; self.cardX = cardX; self.cardY = cardY
             self.underPointer = underPointer; self.inGap = inGap; self.snappedTo = snappedTo
@@ -206,7 +210,7 @@ public enum HoverSweep {
         public var isMismatch: Bool { expected != hovered }
 
         enum CodingKeys: String, CodingKey {
-            case frame, x, y, viewX, viewY, t, hovered, cardShown, cardX, cardY, underPointer, inGap, snappedTo, expected, cardRect, cardClipped
+            case frame, x, y, viewX, viewY, t, hovered, cardShown, cardX, cardY, underPointer, inGap, snappedTo, expected, cardRect, cardClipped, cardReachFailure
         }
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -219,7 +223,8 @@ public enum HoverSweep {
                       inGap: try c.decodeIfPresent(Bool.self, forKey: .inGap) ?? false,
                       snappedTo: try c.decodeIfPresent(String.self, forKey: .snappedTo),
                       cardRect: try c.decodeIfPresent(Rect.self, forKey: .cardRect),
-                      cardClipped: try c.decodeIfPresent(Bool.self, forKey: .cardClipped) ?? false)
+                      cardClipped: try c.decodeIfPresent(Bool.self, forKey: .cardClipped) ?? false,
+                      cardReachFailure: try c.decodeIfPresent(Bool.self, forKey: .cardReachFailure) ?? false)
         }
 
         /// Writes `null` for missing values instead of leaving the key out.
@@ -232,6 +237,7 @@ public enum HoverSweep {
             try c.encode(underPointer, forKey: .underPointer); try c.encode(inGap, forKey: .inGap); try c.encode(snappedTo, forKey: .snappedTo)
             try c.encode(expected, forKey: .expected)
             try c.encode(cardRect, forKey: .cardRect); try c.encode(cardClipped, forKey: .cardClipped)
+            try c.encode(cardReachFailure, forKey: .cardReachFailure)
         }
     }
 
@@ -247,6 +253,8 @@ public enum HoverSweep {
         public var distinctHovered: Int
         /// Frames whose card is not fully inside the popover (D19). Expected 0.
         public var cardClipped: Int
+        /// Frames whose card can't be reached (D21). Expected 0.
+        public var cardReachFailures: Int
 
         public init(_ frames: [Frame]) {
             self.frames = frames
@@ -256,11 +264,12 @@ public enum HoverSweep {
             gapFrames = frames.filter(\.inGap).count
             distinctHovered = Set(frames.compactMap(\.hovered)).count
             cardClipped = frames.filter(\.cardClipped).count
+            cardReachFailures = frames.filter(\.cardReachFailure).count
         }
 
         public var summary: String {
             "\(frames.count) frames, \(hoveredCount) hovered, \(distinctHovered) distinct leaves, \(gapFrames) in gaps, "
-                + "\(mismatches) mismatches, \(cardClipped) clipped cards" + (mismatches > 0 ? " (frames \(mismatchFrames.map(String.init).joined(separator: ", ")))" : "")
+                + "\(mismatches) mismatches, \(cardClipped) clipped cards, \(cardReachFailures) card reach failures" + (mismatches > 0 ? " (frames \(mismatchFrames.map(String.init).joined(separator: ", ")))" : "")
         }
     }
 
@@ -280,10 +289,11 @@ public enum HoverSweep {
         let gap = onMap && truth == nil
         let rect = tracker.card == nil ? nil : tracker.cardRect
         let clipped = rect.map { tracker.space?.clips($0) ?? !$0.inside(width: map.width, height: map.height) } ?? false
+        let overPointer = p.flatMap { pp in rect.map { $0.contains(tracker.cardPoint(pp)) } } ?? false
         return Frame(frame: i, x: q.x, y: q.y, viewX: v.x, viewY: v.y, t: t, hovered: tracker.hovered,
                      cardShown: tracker.card != nil, cardX: tracker.cardOrigin?.x, cardY: tracker.cardOrigin?.y,
                      underPointer: truth, inGap: gap, snappedTo: gap ? map.hit(at: q)?.item.id : nil,
-                     cardRect: rect, cardClipped: clipped)
+                     cardRect: rect, cardClipped: clipped, cardReachFailure: clipped || overPointer)
     }
 
     /// Serpentine across `rows` horizontal lines, then one point off the map and a settle after the grace.

@@ -10,9 +10,15 @@ final class AppModel: ObservableObject {
     /// The last finished scan, or the scan in progress built up repo by repo (every repo).
     @Published var scanned: ScanResult?
     /// Repos hidden by the header filter (D18), persisted in UserDefaults by repo path.
-    @Published private(set) var filter = RepoFilter.load()
-    /// What the popover shows: `scanned` with the filter applied. Map, counts, Clear and List all use this.
-    var result: ScanResult? { scanned.map(filter.apply) }
+    @Published private(set) var filter = VisibleSet.atLaunch().repos
+    /// Legend state filter (D21). Session-only: not persisted, so each launch starts with every state.
+    @Published private(set) var states = VisibleSet.atLaunch().states
+    /// Repo filter AND state filter (D21).
+    var visible: VisibleSet { VisibleSet(repos: filter, states: states) }
+    /// What the popover shows: `scanned` with both filters applied. Map, counts, Clear and List all use this.
+    var result: ScanResult? { scanned.map(visible.apply) }
+    /// The repos are selected but the state filter leaves nothing.
+    var nothingMatches: Bool { scanned.map { !filter.isEmpty($0.repos) && visible.nothingMatches($0) } ?? false }
     /// True when there are repos but the filter hides all of them.
     var filterHidesEverything: Bool { scanned.map { filter.isEmpty($0.repos) } ?? false }
     @Published var scanning = false
@@ -53,6 +59,14 @@ final class AppModel: ObservableObject {
         relayout()
     }
 
+    /// Changes the legend state filter (session only) and re-lays out the map. The caller animates.
+    func setStates(_ s: StateFilter) {
+        guard s != states else { return }
+        hover.reset()
+        states = s
+        relayout()
+    }
+
     /// Repos that left the scan drop out of the exclusions quietly (only once a scan has finished).
     private func pruneFilter() {
         guard let s = scanned else { return }
@@ -66,6 +80,13 @@ final class AppModel: ObservableObject {
         precondition(cleanupDisabled)
         guard let s = scanned else { return }
         setFilter(RepoFilter.only(names: names, among: s.repos))
+    }
+
+    /// Sweep/snapshot hook only: `--state ready|uncommitted|clean|stale[,..]`.
+    func applyStateList(_ list: String) -> Bool {
+        precondition(cleanupDisabled)
+        guard let s = StateFilter.parse(list) else { return false }
+        setStates(s); return true
     }
 
     /// Snapshot hook only: show the "cached, scan in progress" state without scanning.
@@ -106,7 +127,7 @@ final class AppModel: ObservableObject {
     // MARK: Cleanup (D14). Only reachable from a click in this UI, and always through the confirm sheet.
 
     /// Worktrees "Clear N" would remove or prune: merged or upstream gone, and nothing uncommitted, unpushed or locked.
-    var clearPlan: [CleanupItem] { cleanupDisabled ? [] : (scanned.map { Cleanup.plan($0, filter: filter) } ?? []) }
+    var clearPlan: [CleanupItem] { cleanupDisabled ? [] : (scanned.map { Cleanup.plan($0, visible: visible) } ?? []) }
     /// Set to show the confirm sheet. Nothing runs until the sheet's Remove button is clicked.
     @Published var pendingCleanup: [CleanupItem]?
     /// What happened in the last run, shown until dismissed.

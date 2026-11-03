@@ -8,6 +8,7 @@ import SwiftUI
 struct PopoverView: View {
     @EnvironmentObject var model: AppModel
     @State private var showList = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -38,16 +39,24 @@ struct PopoverView: View {
                     .font(.system(size: 12)).foregroundColor(Theme.ink2)
                     .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.mapHeight) // same box (D17, D18)
                     .transition(.opacity)
+            } else if model.nothingMatches {
+                VStack(spacing: 8) {
+                    Text("Nothing matches").font(.system(size: 12)).foregroundColor(Theme.ink2)
+                    Button("Show all") { withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) { model.setStates(.all) } }
+                        .buttonStyle(.borderless).font(.system(size: 11))
+                }
+                .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.mapHeight) // same box (D17, D21)
+                .transition(.opacity)
             } else if let map = model.leafMap, let r = model.result {
                 LeafMapView(map: map, result: r)
-                    .id(model.filter)          // a filter change cross-fades the re-laid-out map (D18)
+                    .id(model.visible)          // a filter change cross-fades the re-laid-out map (D18)
                     .transition(.opacity)
             } else {
                 Text(model.scanning ? "Looking for repositories and worktrees…" : (model.scanError == nil ? "No scan yet" : "No results"))
                     .font(.system(size: 11)).foregroundColor(Theme.ink2)
                     .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.mapHeight) // same layout in every state (D17)
             }
-            HStack { Key(); Spacer(); Text(model.result.flatMap { Format.cachesTotal($0.caches) } ?? "").font(.system(size: 11)).foregroundColor(Theme.ink2) }
+            HStack { Key(); Spacer(minLength: 4); Text(model.result.flatMap { Format.cachesTotal($0.caches) } ?? "").font(.system(size: 11)).foregroundColor(Theme.ink2).lineLimit(1).layoutPriority(-1) }
             FreeBar(free: model.freeBytes ?? 0, total: model.result?.volume?.totalBytes ?? 0)
             HStack(spacing: 8) {
                 let n = model.clearPlan.count
@@ -77,7 +86,7 @@ struct PopoverView: View {
         .coordinateSpace(name: PopoverSpace.name)
         // D19: the card sits above everything, placed against the whole popover, so nothing clips it.
         .overlay(alignment: .topLeading) {
-            if let r = model.result, !model.filterHidesEverything { HoverCardOverlay(result: r) }
+            if let r = model.result, !model.filterHidesEverything, !model.nothingMatches { HoverCardOverlay(result: r) }
         }
         .background(GeometryReader { g in
             Color.clear.onAppear { model.hover.popoverSize = Pt(g.size.width, g.size.height) }
@@ -98,17 +107,62 @@ struct PopoverView: View {
 }
 
 /// One legend line, three dots (D13).
+/// The legend, as state filters (D21): click toggles a state, ⌥-click shows only it, inactive items are dimmed.
+/// "Ready to clean (N)" is exactly Clear N's set (CleanupSafety). "Show all" appears when any are off.
 struct Key: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
-        HStack(spacing: 12) {
-            ForEach([(LeafState.protected, "Uncommitted / unpushed"), (.clean, "Clean"), (.stale, "Merged / stale")], id: \.1) { st, name in
-                HStack(spacing: 5) {
-                    Circle().fill(Color(hex: LeafPalette.fill(st))).frame(width: 8, height: 8)
-                    Text(name)
+        let s = model.states
+        HStack(spacing: 9) {
+            ForEach(StateKey.allCases, id: \.self) { k in
+                Button { tap(k) } label: {
+                    HStack(spacing: 4) {
+                        dot(k)
+                        Text(k == .ready ? "\(short(k)) (\(readyCount))" : short(k))
+                            .fontWeight(s.isActive(k) && !s.isAll ? .semibold : .regular)
+                    }
+                    .padding(.horizontal, 4).padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(s.isActive(k) && !s.isAll ? Theme.line : Color.clear))
+                    .opacity(s.isAll || s.isActive(k) ? 1 : 0.45)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.borderless)
+                .help(k == .ready ? "Exactly what Clear would remove. ⌥-click: only this." : "\(k.title). Click to toggle, ⌥-click: only this.")
+                .accessibilityLabel("\(k.title)\(k == .ready ? ", \(readyCount)" : ""), \(s.isActive(k) ? "shown" : "hidden")")
+            }
+            if !s.isAll {
+                Button("Show all") { set(.all) }.buttonStyle(.borderless)
             }
         }
         .font(.system(size: 11)).foregroundColor(Theme.ink2)
+        .lineLimit(1)
+    }
+
+    private var readyCount: Int { model.scanned.map { model.visible.count(.ready, in: $0) } ?? 0 }
+
+    private func short(_ k: StateKey) -> String {
+        switch k { case .uncommitted: "Uncommitted"; case .clean: "Clean"; case .stale: "Stale"; case .ready: "Ready to clean" }
+    }
+
+    @ViewBuilder private func dot(_ k: StateKey) -> some View {
+        switch k {
+        case .uncommitted: Circle().fill(Color(hex: LeafPalette.fill(.protected))).frame(width: 8, height: 8)
+        case .clean: Circle().fill(Color(hex: LeafPalette.fill(.clean))).frame(width: 8, height: 8)
+        case .stale: Circle().fill(Color(hex: LeafPalette.fill(.stale))).frame(width: 8, height: 8)
+        case .ready: Circle().stroke(Color(hex: LeafPalette.staleStroke), lineWidth: 1.5).frame(width: 8, height: 8)
+        }
+    }
+
+    private func tap(_ k: StateKey) {
+        var s = model.states
+        if NSEvent.modifierFlags.contains(.option) { s = .only(k) } else { s.toggle(k) }
+        set(s)
+    }
+
+    private func set(_ s: StateFilter) {
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) { model.setStates(s) }
     }
 }
 

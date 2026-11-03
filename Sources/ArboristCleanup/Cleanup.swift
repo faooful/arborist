@@ -5,25 +5,6 @@ import Foundation
 // app links. The `arborist` CLI does not depend on it, so the CLI stays read-only. CleanupTests checks this
 // in Package.swift.
 
-/// Why a worktree can't be cleared. nil from `Cleanup.blocker` means it's safe.
-public enum CleanupBlocker: Equatable, Sendable {
-    case mainCheckout
-    case locked
-    case uncommitted(Int)
-    case unpushed
-    case notStale
-
-    public var reason: String {
-        switch self {
-        case .mainCheckout: "Main checkout"
-        case .locked: "Locked"
-        case .uncommitted(let n): n == 1 ? "1 uncommitted file" : "\(n) uncommitted files"
-        case .unpushed: "Unpushed commits"
-        case .notStale: "Not merged"
-        }
-    }
-}
-
 /// One planned action: remove a worktree folder, or just prune git's record of one whose folder is gone.
 public struct CleanupItem: Equatable, Sendable, Identifiable {
     public enum Kind: String, Sendable { case remove, pruneOnly = "prune" }
@@ -67,15 +48,7 @@ public enum Cleanup {
     /// - it's not the main checkout and not locked
     /// - it has no uncommitted files and no unpushed commits
     /// - its branch is merged into the default branch, its upstream is gone, or its folder is missing (prune only)
-    public static func blocker(_ w: Worktree) -> CleanupBlocker? {
-        if w.isMain { return .mainCheckout }
-        if w.locked == true { return .locked }
-        if w.staleReasons.contains(.prunable) { return nil }
-        if w.dirty { return .uncommitted(max(w.uncommittedFiles ?? 1, 1)) }
-        if (w.unpushedCommits ?? 0) > 0 || (w.ahead ?? 0) > 0 { return .unpushed }
-        if !(w.staleReasons.contains(.merged) || w.staleReasons.contains(.upstreamGone)) { return .notStale }
-        return nil
-    }
+    public static func blocker(_ w: Worktree) -> CleanupBlocker? { CleanupSafety.blocker(w) }
 
     public static func item(_ w: Worktree, repo: Repo) -> CleanupItem? { item(w, repo: repo.name, repoPath: repo.path) }
     public static func item(_ ref: WorktreeRef) -> CleanupItem? { item(ref.worktree, repo: ref.repo, repoPath: ref.repoPath) }
@@ -91,7 +64,12 @@ public enum Cleanup {
     /// The plan for the repos the filter shows (D18): the filter is applied before the plan is built,
     /// so "Clear N", its confirm sheet and the removals never include a hidden repo's worktrees.
     public static func plan(_ result: ScanResult, filter: RepoFilter) -> [CleanupItem] {
-        plan(filter.apply(result))
+        plan(result, visible: VisibleSet(repos: filter))
+    }
+
+    /// D21: the safe set within what's visible (repo filter AND state filter). Same VisibleSet as the map.
+    public static func plan(_ result: ScanResult, visible: VisibleSet) -> [CleanupItem] {
+        plan(visible.apply(result))
     }
 
     public static func plan(_ result: ScanResult) -> [CleanupItem] {
