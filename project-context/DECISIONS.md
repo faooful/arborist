@@ -104,3 +104,35 @@ D15 kept the last leaf hovered anywhere inside the map. The leaf shapes don't fi
 - **Placement.** `CardPlacement.place` (pure, Core) tries below the leaf, then right, then left, and flips above when there's no room. It keeps the current spot while it still fits and stays clear of the leaf. The result is always clamped inside the popover with an 8 pt margin.
 - **Size.** Placement uses the taller of `LeafSVG.cardSlot` (2 message lines plus the Remove row, 226 pt) and the card's measured height.
 - **Sweep.** Each frame has `cardRect` (popover coordinates) and `cardClipped`. The report has a top-level `cardClipped` count, expected 0 and asserted in the tests. The app sweep measures the space from AppKit's real layout; the CLI uses the SVG popover's geometry. The SVG draws the card in popover coordinates too.
+
+## D20: The hover card can be reached (2026-11-03)
+
+Moving from a leaf to its card used to cross other leaves, which took the hover and moved or swapped the
+card before the pointer got there; unpinned, the card also let clicks through to the leaves under it.
+
+- **Card priority.** A pointer on the shown card keeps it (`HoverTracker.onCard`), whatever leaf is under it.
+  The card overlay always takes hits, so its buttons work pinned or not; a click on the card never pins or unpins.
+  The card has its own tracking area (converted to map coordinates), so the pointer on a part of the card
+  outside the map still counts. The map's exit is ignored while on the card; leaving the card (`exitCard`)
+  clears after `leaveDelay` unless the pointer lands back on the map or card.
+- **Corridor + grace.** The convex hull of the hovered leaf's rect and the card's rect is a corridor. Over
+  other leaves or gaps inside it, the card is held for `cardGrace` = 250 ms (from entering the corridor);
+  after that a move is ordinary. Leaving the map while held waits for the same grace.
+- **Dwell.** Moving onto another leaf (outside the corridor) switches after `switchDwell` = 120 ms on it; going
+  back first cancels. The app schedules the switch with the same cancellable timer as a clear (`nextDeadline`).
+- **Buttons at fixed offsets.** The card is the fixed slot height (226) with the footer pinned to the bottom,
+  so Core `HoverCardLayout` knows where Reveal in Finder and Remove sit.
+- **Sweep.** Frames gain `onCard`, `inCorridor`, `buttonUnderPointer`, `reachTarget`; `expected` is the card's
+  leaf while on the card or held. After the serpentine a reach-into-card path (7 frames, under the grace) goes
+  from the hovered leaf's centre to the first button; it must land on a button (`cardReachFailures` counts a
+  miss, a clipped card, or a card placed over the pointer). Instant mode jumps to the next clear or switch.
+
+## D21: Legend items are state filters; "Ready to clean" (2026-11-03)
+
+- **Legend.** Clicking an item toggles that state and ⌥-click shows only that state. Active items look selected and inactive ones are dimmed. A small "Show all" appears when any state is off. To fit 448 pt, the labels are shortened to Uncommitted, Clean, Stale and Ready to clean; tooltips give the full names.
+- **Ready to clean (N).** This is exactly the set Clear N would remove. The D14 safety predicate moved into Core as `CleanupSafety.blocker`/`isReady`, and both `Cleanup.blocker` and `Cleanup.item` call it, so there is one predicate and no copy. Clicking the item shows only those worktrees, and N equals Clear N (tested).
+- **Composition.** Core `StateFilter` (session-only) and `RepoFilter` (persisted, D18) are combined in `VisibleSet`, which keeps a worktree only if its repo is selected AND its state is shown. Repos with nothing left drop out. The map layout, headline and stale counts, and the List all read `VisibleSet.apply`, and `Cleanup.plan(_:visible:)` builds Clear N from the same output, so Clear N is the safe set within what's visible.
+- **Session-only.** `VisibleSet.atLaunch` loads the repo filter and always starts with every state. Nothing about states is written to UserDefaults (tested).
+- **Motion and layout.** The cross-fade and Reduce Motion handling are the same as D18, and the map stays 448×400. If the filters leave nothing, the same box shows "Nothing matches" with a Show all button.
+- **Hooks.** `--state ready|uncommitted|clean|stale[,..]` works on the app's `--snapshot` and `--hover-sweep` and on CLI `render`/`--hover-sweep`, combined with `--filter`.
+- **Card reach.** Each sweep frame has `cardReachFailure`: the card is clipped, or it sits over the pointer so the click meant to pin the leaf would land on the card. The report counts these as `cardReachFailures`, expected 0. With very large leaves (e.g. `--state ready` on one repo) no spot clears the leaf, so `CardPlacement` now also takes the pointer and picks the least-overlap spot, including the popover's corners, that leaves the pointer free.

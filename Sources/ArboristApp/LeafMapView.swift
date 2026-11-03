@@ -84,6 +84,7 @@ enum PopoverSpace { static let name = "popover" }
 /// is in popover coordinates (CardPlacement, against the whole popover).
 struct HoverCardOverlay: View {
     @EnvironmentObject var hover: HoverModel
+    @EnvironmentObject var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let result: ScanResult
 
@@ -93,7 +94,9 @@ struct HoverCardOverlay: View {
             if let id = v.card, let o = v.cardOrigin, let ref = WorktreeList.find(result, path: id) {
                 ZStack(alignment: .topLeading) {
                     HoverCardView(card: HoverCard(ref), ref: ref)
-                        .fixedSize(horizontal: false, vertical: true)
+                        // D20: the card's own tracking, so the pointer on it (even outside the map) keeps it.
+                        .background(MouseTracking(onMove: { p in if let m = model.leafMap { hover.cardPointer(local: p, in: m) } },
+                                                  onExit: { hover.exitCard() }))
                         .background(GeometryReader { g in
                             Color.clear.onAppear { hover.measuredCard(g.size) }.onChange(of: g.size) { hover.measuredCard($0) }
                         })
@@ -105,8 +108,8 @@ struct HoverCardOverlay: View {
                 .offset(x: o.x, y: o.y)
                 // Slides to a new place; with Reduce Motion it jumps (opacity changes still fade).
                 .animation(reduceMotion || hover.instant ? nil : .easeInOut(duration: HoverTracker.duration(reduceMotion: false)), value: o)
-                // Unpinned, the card lets the pointer through to the leaves under it. Pinned, its buttons work.
-                .allowsHitTesting(v.pinned)
+                // D20: the card takes priority over the leaves under it, so its buttons work pinned or not.
+                .allowsHitTesting(true)
                 .transition(.opacity)
             }
         }
@@ -203,6 +206,8 @@ struct HoverCardView: View {
                 Text(card.message.joined(separator: "\n")).font(.system(size: 11)).foregroundColor(Theme.ink)
                     .lineLimit(2).fixedSize(horizontal: false, vertical: true).padding(.top, 6)
             }
+            // D20: the footer sits at the bottom of the fixed card slot, where HoverCardLayout puts the buttons.
+            Spacer(minLength: 0)
             HStack(spacing: 6) {
                 Button("Reveal in Finder") { model.reveal(ref.worktree.path) }
                 if let cmd = card.removeCommand { Button("Copy remove command") { model.copy(cmd) }.help(cmd) }
@@ -212,7 +217,7 @@ struct HoverCardView: View {
             RemoveButton(ref: ref).buttonStyle(SubtleButtonStyle()).padding(.top, 4)
         }
         .padding(10)
-        .frame(width: LeafSVG.cardWidth, alignment: .leading)
+        .frame(width: LeafSVG.cardWidth, height: LeafSVG.cardSlot.y, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: 9).fill(Color(hex: LeafPalette.cardFill)).shadow(color: .black.opacity(0.12), radius: 5, y: 3))
         .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color(hex: LeafPalette.cardStroke), lineWidth: 0.6))
     }

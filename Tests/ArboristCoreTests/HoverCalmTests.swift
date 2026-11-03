@@ -25,6 +25,8 @@ final class HoverCalmTests: XCTestCase {
                     t.move(to: p, in: map, at: f)
                     XCTAssertNotNil(t.hovered, "nil at \(p) between \(a.item.id) and \(b.item.id)")
                 }
+                // D20: the switch lands once the corridor's grace and the dwell have passed.
+                rest(&t, at: b.centroid, in: map, from: 1)
                 XCTAssertEqual(t.hovered, b.item.id)
                 break
             }
@@ -75,7 +77,7 @@ final class HoverCalmTests: XCTestCase {
         let origins = shown.map { Pt($0.cardX!, $0.cardY!) }
         let moves = zip(origins, origins.dropFirst()).filter { $0 != $1 }.count
         let hoverChanges = zip(shown, shown.dropFirst()).filter { $0.hovered != $1.hovered }.count
-        XCTAssertGreaterThan(hoverChanges, 20, "the sweep crossed many leaves")
+        XCTAssertGreaterThan(hoverChanges, 10, "the sweep crossed many leaves (D20 holds the card in the corridor)")
         XCTAssertLessThanOrEqual(moves, 4, "card stays anchored across the sweep")
         // The first row (top half) keeps one slot the whole way.
         XCTAssertEqual(Set(origins.prefix(14).map { "\($0.x),\($0.y)" }).count, 1)
@@ -108,11 +110,11 @@ final class HoverCalmTests: XCTestCase {
         var t = HoverTracker()
         t.move(to: a.centroid, in: m, at: 0)
         XCTAssertEqual(t.appearance(of: a.item.id, reduceMotion: false).scale, s)
-        t.move(to: p, in: m, at: 0.02)
+        rest(&t, at: p, in: m, from: 0.02)
         XCTAssertEqual(t.hovered, b.item.id)
         // And the gutter just outside A still belongs to A (nearest edge), not to nothing.
-        t.move(to: a.centroid, in: m, at: 0.03)
-        t.move(to: Pt(100.2, 50), in: m, at: 0.04)
+        rest(&t, at: a.centroid, in: m, from: 1)
+        rest(&t, at: Pt(100.2, 50), in: m, from: 2)
         XCTAssertEqual(t.hovered, a.item.id)
     }
 
@@ -125,7 +127,7 @@ final class HoverCalmTests: XCTestCase {
         t.exit(at: 0.2); XCTAssertFalse(t.settle(at: 5), "a pinned card stays")
         if let r = t.cardRect { XCTAssertFalse(t.click(at: Pt(r.x + 5, r.y + 5), in: map), "clicks on the pinned card are its own") }
         XCTAssertTrue(t.click(at: a.centroid, in: map)); XCTAssertFalse(t.pinned)
-        t.move(to: b.centroid, in: map, at: 6); XCTAssertEqual(t.hovered, b.item.id)
+        rest(&t, at: b.centroid, in: map, from: 6); XCTAssertEqual(t.hovered, b.item.id)
         t.reset(); XCTAssertNil(t.hovered); XCTAssertFalse(t.pinned)
     }
 
@@ -134,5 +136,12 @@ final class HoverCalmTests: XCTestCase {
         let s = String(decoding: HoverSweep.json(frames), as: UTF8.self)
         XCTAssertTrue(s.contains("\"hovered\" : null"))
         XCTAssertTrue(s.contains("\"cardShown\" : false"))
+    }
+
+    /// D20: rest the pointer at `p` long enough for the corridor's grace and the switch dwell to pass.
+    private func rest(_ t: inout HoverTracker, at p: Pt, in m: LeafMap, from t0: Double) {
+        t.move(to: p, in: m, at: t0)
+        t.move(to: p, in: m, at: t0 + HoverTracker.cardGrace + 0.01)
+        t.settle(at: t0 + HoverTracker.cardGrace + HoverTracker.switchDwell + 0.02)
     }
 }

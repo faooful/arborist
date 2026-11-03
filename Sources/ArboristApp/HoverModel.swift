@@ -54,7 +54,22 @@ final class HoverModel: ObservableObject {
         tracker.move(to: Pt(p.x, p.y), in: map, at: t ?? Self.now())
         publish(animated)
         // D16: in a far gap the tracker sets a clear deadline; the same cancellable timer applies it.
-        if tracker.clearAt != nil { scheduleSettle(animated) }
+        if tracker.nextDeadline != nil { scheduleSettle(animated) }
+    }
+
+    /// D20: pointer on the card at `local` (the card's own coordinates, top-left). Goes through the same
+    /// tracker as the map, in map coordinates, so the card keeps priority over the leaves under it.
+    func cardPointer(local p: CGPoint, in map: LeafMap) {
+        guard let o = tracker.cardOrigin, let s = tracker.space else { return }
+        let view = Pt(o.x + p.x - s.mapOrigin.x, o.y + p.y - s.mapOrigin.y)
+        pointer(view: CGPoint(x: view.x, y: view.y), in: map)
+    }
+
+    /// D20: the pointer left the card.
+    func exitCard(at t: Double? = nil) {
+        tracker.exitCard(at: t ?? Self.now())
+        publish(true)
+        if tracker.nextDeadline != nil { scheduleSettle(true) }
     }
 
     /// Pointer left the map: clear after the grace period unless it comes back.
@@ -97,7 +112,7 @@ final class HoverModel: ObservableObject {
 
     private func scheduleSettle(_ animated: Bool) {
         settleWork?.cancel()
-        let remaining = max(0, (tracker.clearAt ?? (Self.now() + HoverTracker.leaveDelay)) - Self.now())
+        let remaining = max(0, (tracker.nextDeadline ?? (Self.now() + HoverTracker.leaveDelay)) - Self.now())
         let delay = UInt64((remaining + 0.005) * 1_000_000_000)
         settleWork = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: delay)

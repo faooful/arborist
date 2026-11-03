@@ -82,6 +82,8 @@ public struct Rect: Codable, Equatable, Sendable {
     public func intersects(_ o: Rect, gap: Double = 0) -> Bool {
         x < o.x + o.w + gap && o.x < x + w + gap && y < o.y + o.h + gap && o.y < y + h + gap
     }
+    public var corners: [Pt] { [Pt(x, y), Pt(x + w, y), Pt(x + w, y + h), Pt(x, y + h)] }
+    public var center: Pt { Pt(x + w / 2, y + h / 2) }
     public func contains(_ p: Pt) -> Bool { p.x >= x && p.x <= x + w && p.y >= y && p.y <= y + h }
     public func inside(width: Double, height: Double) -> Bool { x >= 0 && y >= 0 && x + w <= width && y + h <= height }
 }
