@@ -11,9 +11,13 @@ let package = Package(
     ],
     targets: [
         .target(name: "ArboristCore"),
+        // Removal code (D14). Only the app links it; the CLI must never depend on it (CleanupTests checks).
+        .target(name: "ArboristCleanup", dependencies: ["ArboristCore"]),
         .executableTarget(name: "arborist", dependencies: ["ArboristCore"]),
         // The app's SwiftUI code is wrapped in `#if os(macOS)`; on Linux it builds a stub.
-        .executableTarget(name: "ArboristApp", dependencies: ["ArboristCore"]),
-        .testTarget(name: "ArboristCoreTests", dependencies: ["ArboristCore"]),
+        .executableTarget(name: "ArboristApp", dependencies: ["ArboristCore", "ArboristCleanup"]),
+        .testTarget(name: "ArboristCoreTests", dependencies: ["ArboristCore", "ArboristCleanup"]),
+        // Non-@testable: compiles the app's calls into Core against the public API only (the app isn't built on Linux).
+        .testTarget(name: "AppSurfaceTests", dependencies: ["ArboristCore", "ArboristCleanup"]),
     ]
 )

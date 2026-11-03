@@ -51,10 +51,14 @@ final class WorktreeLabelAndListTests: XCTestCase {
         let ref = try XCTUnwrap(WorktreeList.sorted(LeafSample.scan).first { $0.worktree.branch == "feat-t5b-handover" })
         let c = HoverCard(ref, now: LeafSample.now, home: LeafSample.home)
         XCTAssertEqual(c.branch, "feat-t5b-handover")
+        XCTAssertEqual(c.pill, "Uncommitted")
         XCTAssertTrue(c.path.hasPrefix("~/"))
-        XCTAssertEqual(c.uncommitted, "4 uncommitted files")
-        XCTAssertTrue(c.action.contains("git worktree remove"))
-        XCTAssertTrue(c.size.contains("rebuildable"))
+        XCTAssertLessThanOrEqual(c.path.count, HoverCard.pathChars)
+        XCTAssertEqual(c.changes, "4 files")
+        XCTAssertEqual(c.sync, "1 ahead")
+        XCTAssertEqual(c.size, "6.2 GB")
+        XCTAssertEqual(c.rebuildableShare, 5.6 / 6.2, accuracy: 0.01)
+        XCTAssertNotNil(c.removeCommand)
     }
 
     func testStatusPrecedence() {

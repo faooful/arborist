@@ -8,7 +8,7 @@ USAGE:
   arborist scan [--json] [--root PATH ...] [--max-depth N]
   arborist free [--json]
   arborist config            print the config file path and contents
-  arborist render [--sample] [--hover N] --out FILE.svg   worktree leaf map as SVG (N: leaf drawn hovered)
+  arborist render [--sample|--busy|--from SCAN.json] [--hover N|PATH] --out FILE.svg   worktree leaf map as SVG (N: leaf drawn hovered)
   arborist render-stages --out FILE.svg        the four menu bar leaf stages as SVG
 
 Without --root, roots come from ~/.config/arborist/config.json (default: ~ and ~/Documents).
@@ -22,15 +22,17 @@ let json = args.contains("--json")
 var config = ArboristConfig.load()
 var roots: [String] = []
 var outPath: String?
-var hoverIndex: Int?
+var hoverArg: String?
+var fromPath: String?
 var i = 0
 while i < args.count {
     switch args[i] {
     case "--root" where i + 1 < args.count: roots.append(args[i + 1]); i += 1
     case "--max-depth" where i + 1 < args.count: config.maxDepth = Int(args[i + 1]) ?? config.maxDepth; i += 1
     case "--out" where i + 1 < args.count: outPath = args[i + 1]; i += 1
-    case "--hover" where i + 1 < args.count: hoverIndex = Int(args[i + 1]); i += 1
-    case "--json", "--sample": break
+    case "--from" where i + 1 < args.count: fromPath = args[i + 1]; i += 1
+    case "--hover" where i + 1 < args.count: hoverArg = args[i + 1]; i += 1
+    case "--json", "--sample", "--busy": break
     case "-h", "--help": print(usage); exit(0)
     default: FileHandle.standardError.write("unknown argument: \(args[i])\n\n\(usage)\n".data(using: .utf8)!); exit(2)
     }
@@ -40,7 +42,7 @@ if !roots.isEmpty { config.roots = roots }
 
 switch command {
 case "scan":
-    let r = Scanner(config: config).scan()
+    let r = args.contains("--busy") ? LeafSample.busy : Scanner(config: config).scan()
     if json { FileHandle.standardOutput.write(try! r.jsonData()); print() } else { print(Format.humanReport(r)) }
 case "free":
     guard let v = DiskUsage.volume(for: ArboristConfig.home) else { exit(1) }
@@ -54,11 +56,14 @@ case "config":
     print(String(decoding: try! e.encode(config), as: UTF8.self))
 case "render":
     let svg: String
-    let sample = args.contains("--sample")
-    let r = sample ? LeafSample.scan : Scanner(config: config).scan()
+    // --sample: small example; --busy: a busy machine (D13); --from FILE: a saved `scan --json`.
+    let sample = args.contains("--sample") || args.contains("--busy") || fromPath != nil
+    let r = try! fromPath.map { try ScanResult.decode(Data(contentsOf: URL(fileURLWithPath: $0))) }
+        ?? (args.contains("--busy") ? LeafSample.busy : sample ? LeafSample.scan : Scanner(config: config).scan())
     let map = LeafLayout.layout(LeafLayout.groups(from: r), staleCount: r.totals.staleWorktrees)
     // --hover N draws the Nth leaf hovered, with its card (for snapshots).
-    let hover = hoverIndex.flatMap { $0 < map.leaves.count ? map.leaves[$0].item.id : nil }
+    // --hover N (leaf index) or --hover PATH (a worktree path).
+    let hover = hoverArg.flatMap { a in Int(a).flatMap { $0 < map.leaves.count ? map.leaves[$0].item.id : nil } ?? map.leaves.first { $0.item.id == a }?.item.id }
     svg = LeafSVG.popover(r, map: map, note: sample ? "sample data · Linux render" : "Linux render", hover: hover,
                           now: sample ? LeafSample.now : Date())
     write(svg)

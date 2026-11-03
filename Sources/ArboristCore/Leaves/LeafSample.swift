@@ -65,3 +65,42 @@ public enum LeafSample {
 
     public static var groups: [LeafGroup] { LeafLayout.groups(from: scan) }
 }
+
+extension LeafSample {
+    /// A busy machine like Joseph's (76 worktrees in 35 repos, long repo names, 0 B prunable /tmp
+    /// worktrees), for the declutter snapshots and label-collision tests (D13). Deterministic.
+    public static var busy: ScanResult {
+        let names = ["property-management", "letta-code", "figma-find", "lexicon", "dogpark", "Storyboard.md", "temper-experiment",
+                     "mockingbird", "canvas-terminal-spike", "test2", "drift", "outputs.space", "Outpost", "product-design", "Recap",
+                     "etch", "sign-sealed", "plan-viewer", "arborist", "farm", "notes", "ledger", "atlas-ui", "kiln", "quarry",
+                     "harbor", "fennel", "orchard", "beacon", "sprout", "relay", "thistle", "pebble", "marrow", "lumen"]
+        let counts = [6, 5, 4, 4, 3, 3, 3, 3, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+        let branches = ["feat-t5b-handover", "qa1103-forms", "pr-7430", "fix-overlap", "spike-ledger", "expedition-roam", "r8/oil",
+                        "copy-tweaks", "onboarding-v2", "perf-pass", "hover-fade", "release-1.4", "deps-bump", "docs"]
+        var seed: UInt64 = 7
+        func rnd() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) }
+        var repos: [Repo] = [], k = 0
+        for (i, name) in names.enumerated() {
+            var wts = [wt(name, i % 5 == 0 ? "master" : "main", main: true, src: 0.05 + rnd() * (i == 7 ? 4 : 0.9),
+                          deps: i == 7 ? 14.8 : rnd() * 1.2, rnd() < 0.35 ? .dirty(Int(rnd() * 9) + 1) : .clean, days: rnd() * 20,
+                          i == 7 ? "fix(wasm): preserve hot-update chunks when the dev server restarts after a config change" : "Merge main")]
+            for j in 1..<counts[i] {
+                k += 1
+                let b = branches[k % branches.count] + (k >= branches.count ? "-\(k / branches.count + 1)" : "")
+                let r = rnd()
+                let st: S = r < 0.3 ? .dirty(Int(rnd() * 12) + 1) : r < 0.42 ? .unpushed(Int(rnd() * 4) + 1) : r < 0.5 ? .merged : .clean
+                let tmp = k % 13 == 0
+                var w = wt(name, b, src: tmp ? 0 : 0.02 + rnd() * 0.25, deps: tmp ? 0 : rnd() * (i == 1 && j == 1 ? 9 : 0.4), tmp ? .gone : st,
+                           days: rnd() * 40, "Work on \(b)", at: tmp ? "/private/tmp/\(name)-\(b.replacingOccurrences(of: "/", with: "-"))" : nil)
+                if tmp { w.staleReasons = [.prunable] }
+                wts.append(w)
+            }
+            repos.append(Repo(name: name, path: "\(home)/code/\(name)", defaultBranch: "main", worktrees: wts))
+        }
+        return ScanResult(scannedAt: now, roots: ["~", "/tmp"], volume: VolumeInfo(path: "/", freeBytes: gb(225), totalBytes: gb(995)),
+                          repos: repos, caches: [CacheEntry(name: "npm", path: "\(home)/.npm", bytes: gb(4.0)),
+                                                  CacheEntry(name: "pnpm", path: "\(home)/Library/pnpm", bytes: gb(2.0)),
+                                                  CacheEntry(name: "Homebrew", path: "\(home)/Library/Caches/Homebrew", bytes: gb(0.832)),
+                                                  CacheEntry(name: "Xcode DerivedData", path: nil, bytes: gb(0.221))], skippedPaths: 3)
+    }
+}
