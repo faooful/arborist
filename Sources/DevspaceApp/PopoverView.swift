@@ -1,43 +1,37 @@
 #if os(macOS)
+import AppKit
 import DevspaceCore
 import SwiftUI
 
-struct MainView: View {
+/// The whole app: a small popover under the menu bar item. Plain styling until the popover redesign lands.
+struct PopoverView: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(model.freeLabel)
-                    .font(.system(size: 72, weight: .light, design: .default))
-                    .foregroundColor(Theme.ink)
-                Text("free").font(.title3).foregroundColor(Theme.ink3)
-            }
-            Text(summary).foregroundColor(Theme.ink2)
-
+        VStack(alignment: .leading, spacing: 10) {
+            Text("\(model.freeLabel) free").font(.title2.weight(.semibold))
+            Text(summary).font(.callout).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+            Divider()
             if let r = model.result {
-                BlobView(result: r).frame(height: 240)
-                Checklist(result: r)
+                Checklist(result: r).frame(maxHeight: 360)
             } else {
-                Spacer()
-                Text(model.scanning ? "Scanning…" : "No scan yet").foregroundColor(Theme.ink3)
-                Spacer()
+                Text(model.scanning ? "Scanning…" : "No scan yet").foregroundColor(.secondary)
             }
-
-            HStack(spacing: 10) {
+            Divider()
+            HStack(spacing: 8) {
                 Button(model.scanning ? "Scanning…" : "Rescan") { model.rescan() }.disabled(model.scanning)
                 Button("Reveal in Finder") { model.reveal(model.selection ?? DevspaceConfig.home) }
                 Spacer()
-                if let r = model.result {
-                    Text("Scanned \(r.scannedAt.formatted(date: .omitted, time: .shortened))")
-                        .font(.caption).foregroundColor(Theme.ink3)
+                Button("Settings…") {
+                    NSApp.activate(ignoringOtherApps: true)
+                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
                 }
+                Button("Quit") { NSApp.terminate(nil) }
             }
             .buttonStyle(PlainPillStyle())
         }
-        .padding(32)
-        .background(Theme.paper)
-        .foregroundColor(Theme.ink)
+        .padding(14)
+        .frame(width: 420)
     }
 
     private var summary: String {
