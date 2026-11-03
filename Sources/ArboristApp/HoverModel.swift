@@ -10,10 +10,12 @@ final class HoverModel: ObservableObject {
     @Published private(set) var visible = HoverTracker().visible
     private(set) var tracker = HoverTracker()
     var reduceMotion = false
-    /// One pending leave timer at a time; a newer event cancels it.
-    private var settleWork: DispatchWorkItem?
+    /// One pending leave timer at a time; a newer event cancels it. A main-actor Task, so the timer
+    /// never touches this model off the main actor.
+    private var settleWork: Task<Void, Never>?
 
-    static func now() -> Double { Date().timeIntervalSinceReferenceDate }
+    /// Wall clock for real events. Nonisolated so it can be used anywhere (Swift 6).
+    nonisolated static func now() -> Double { Date().timeIntervalSinceReferenceDate }
 
     var hovered: String? { visible.hovered }
     var cardOpacity: Double { tracker.cardOpacity }
@@ -23,9 +25,9 @@ final class HoverModel: ObservableObject {
 
     /// Pointer at `p` in the map view's own coordinates (top-left, y down). Mouse events and the sweep both
     /// come in here; the point goes through the same transform the drawing uses.
-    func pointer(view p: CGPoint, in map: LeafMap, at t: Double = HoverModel.now(), animated: Bool = true) {
+    func pointer(view p: CGPoint, in map: LeafMap, at t: Double? = nil, animated: Bool = true) {
         let q = transform.toMap(Pt(p.x, p.y))
-        move(to: CGPoint(x: q.x, y: q.y), in: map, at: t, animated: animated)
+        move(to: CGPoint(x: q.x, y: q.y), in: map, at: t ?? Self.now(), animated: animated)
     }
 
     func click(view p: CGPoint, in map: LeafMap) {
@@ -34,15 +36,15 @@ final class HoverModel: ObservableObject {
     }
 
     /// Pointer moved over the map (map coordinates). Real mouse events and the sweep both call this.
-    func move(to p: CGPoint, in map: LeafMap, at t: Double = HoverModel.now(), animated: Bool = true) {
+    func move(to p: CGPoint, in map: LeafMap, at t: Double? = nil, animated: Bool = true) {
         settleWork?.cancel()
-        tracker.move(to: Pt(p.x, p.y), in: map, at: t)
+        tracker.move(to: Pt(p.x, p.y), in: map, at: t ?? Self.now())
         publish(animated)
     }
 
     /// Pointer left the map: clear after the grace period unless it comes back.
-    func exit(at t: Double = HoverModel.now(), animated: Bool = true) {
-        tracker.exit(at: t)
+    func exit(at t: Double? = nil, animated: Bool = true) {
+        tracker.exit(at: t ?? Self.now())
         scheduleSettle(animated)
     }
 
@@ -75,11 +77,12 @@ final class HoverModel: ObservableObject {
 
     private func scheduleSettle(_ animated: Bool) {
         settleWork?.cancel()
-        let w = DispatchWorkItem { [weak self] in
-            MainActor.assumeIsolated { self?.settle(at: HoverModel.now(), animated: animated) }
+        let delay = UInt64((HoverTracker.leaveDelay + 0.005) * 1_000_000_000)
+        settleWork = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: delay)
+            guard !Task.isCancelled else { return }
+            self?.settle(at: HoverModel.now(), animated: animated)
         }
-        settleWork = w
-        DispatchQueue.main.asyncAfter(deadline: .now() + HoverTracker.leaveDelay + 0.005, execute: w)
     }
 
     private func publish(_ animated: Bool) {
@@ -99,8 +102,8 @@ final class HoverModel: ObservableObject {
 /// mouseMoved even when the popover window isn't key. It returns nil from hitTest, so clicks still reach
 /// SwiftUI.
 struct MouseTracking: NSViewRepresentable {
-    var onMove: (CGPoint) -> Void
-    var onExit: () -> Void
+    var onMove: @MainActor (CGPoint) -> Void
+    var onExit: @MainActor () -> Void
 
     func makeNSView(context: Context) -> TrackingNSView {
         let v = TrackingNSView()
@@ -112,8 +115,9 @@ struct MouseTracking: NSViewRepresentable {
     }
 
     final class TrackingNSView: NSView {
-        var onMove: (CGPoint) -> Void = { _ in }
-        var onExit: () -> Void = {}
+        // NSView and its event methods are main-actor isolated, so these are called on the main actor.
+        var onMove: @MainActor (CGPoint) -> Void = { _ in }
+        var onExit: @MainActor () -> Void = {}
         private var area: NSTrackingArea?
 
         override var isFlipped: Bool { true } // top-left origin, like the map

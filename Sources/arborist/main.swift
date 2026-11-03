@@ -82,13 +82,14 @@ case "render":
         print("\(frames.count) frames in \(dir)")
         exit(0)
     }
-    write(svg)
+    write(svg, to: outPath)
 case "render-stages":
-    write(LeafSVG.stageStrip())
+    write(LeafSVG.stageStrip(), to: outPath)
 case "-h", "--help", "help": print(usage)
 default: print(usage); exit(2)
 }
 
-func write(_ svg: String) {
+/// Takes the path as a parameter so it doesn't read top-level state (fine in Swift 5 and 6 modes).
+func write(_ svg: String, to outPath: String?) {
     if let outPath { try! svg.write(toFile: outPath, atomically: true, encoding: .utf8); print(outPath) } else { print(svg) }
 }

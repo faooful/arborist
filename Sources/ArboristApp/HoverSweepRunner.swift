@@ -21,7 +21,16 @@ enum HoverSweepRunner {
         return args[i + 1]
     }
 
+    /// Hard deadline: the sweep exits on its own even if rendering hangs (the Mac has no `timeout`).
+    static let deadlineSeconds = 60.0
+
     static func run(into dir: String) {
+        // Fires on a background queue, so it works even while the main thread is stuck in a render.
+        let limit = deadlineSeconds
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + limit) {
+            FileHandle.standardError.write(Data("hover-sweep: timed out after \(Int(limit)) s\n".utf8))
+            exit(2)
+        }
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.prohibited) // no Dock icon, no menu bar item
         let scan = ScanCache.load() ?? Scanner(config: ArboristConfig.load()).scan()

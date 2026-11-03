@@ -155,7 +155,7 @@ final class CleanupTests: XCTestCase {
         let url = URL(fileURLWithPath: base + "/cfg/cleanup.log")
         CleanupLog.append([.removed(i), .skipped(i, reason: "x")], to: url, at: date)
         CleanupLog.append([.pruned(i)], to: url, at: date)
-        XCTAssertEqual(try String(contentsOf: url).split(separator: "\n").count, 2)
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8).split(separator: "\n").count, 2)
     }
 
     // MARK: boundary
@@ -164,14 +164,14 @@ final class CleanupTests: XCTestCase {
     /// and no CLI source imports ArboristCleanup.
     func testCLICannotReachTheRemover() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let pkg = try String(contentsOf: root.appendingPathComponent("Package.swift"))
+        let pkg = try String(contentsOf: root.appendingPathComponent("Package.swift"), encoding: .utf8)
         let line = try XCTUnwrap(pkg.split(separator: "\n").first { $0.contains(".executableTarget(name: \"arborist\"") })
         XCTAssertFalse(line.contains("ArboristCleanup"), "CLI target must not depend on ArboristCleanup")
         let core = try XCTUnwrap(pkg.split(separator: "\n").first { $0.contains(".target(name: \"ArboristCore\"") })
         XCTAssertFalse(core.contains("ArboristCleanup"))
         let cli = root.appendingPathComponent("Sources/arborist")
         for f in try fm.contentsOfDirectory(atPath: cli.path) {
-            let s = try String(contentsOf: cli.appendingPathComponent(f))
+            let s = try String(contentsOf: cli.appendingPathComponent(f), encoding: .utf8)
             XCTAssertFalse(s.contains("ArboristCleanup"), f)
             XCTAssertFalse(s.contains("\"remove\""), f)
         }
@@ -180,7 +180,7 @@ final class CleanupTests: XCTestCase {
         let e = fm.enumerator(atPath: coreDir.path)!
         while let f = e.nextObject() as? String {
             guard f.hasSuffix(".swift") else { continue }
-            let s = try String(contentsOf: coreDir.appendingPathComponent(f))
+            let s = try String(contentsOf: coreDir.appendingPathComponent(f), encoding: .utf8)
             XCTAssertFalse(s.contains("\"worktree\", \"remove\""), f)
         }
     }

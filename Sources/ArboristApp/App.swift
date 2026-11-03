@@ -6,11 +6,12 @@ import SwiftUI
 /// Entry point. Normally starts the menu bar app. In DEBUG builds, `--hover-sweep DIR` together with
 /// `ARBORIST_HOVER_SWEEP=1` runs the hover test hook instead and exits, without creating the menu bar item (D15).
 @main
+@MainActor
 enum Entry {
     static func main() {
         #if DEBUG
         if let dir = HoverSweepRunner.requestedDirectory() {
-            MainActor.assumeIsolated { HoverSweepRunner.run(into: dir) }
+            HoverSweepRunner.run(into: dir)
             exit(0)
         }
         #endif
