@@ -472,6 +472,11 @@ public enum HoverSweep {
         /// D24: text/button overlaps in drawn frames plus every layout case. Expected 0.
         public var overlaps: Int
         public var layoutCases: [LayoutCase]
+        /// D26: header items truncated against their frames (worst-case counts, plus what was drawn). Expected 0.
+        public var headerTruncations: Int
+        /// D26: repo menu colour pairs under WCAG minimums (text 4.5:1, checkboxes 3:1). Expected 0.
+        public var menuContrast: Int
+        public var menuChecks: [RepoMenuStyle.Contrast]
         /// D25: idle frames whose panel has an empty vertical run over RestLayout.maxEmptyGap. Expected 0.
         public var idleEmptyGapViolations: Int
         public var maxIdleEmptyGap: Double
@@ -483,8 +488,11 @@ public enum HoverSweep {
         public var hoverSwaps: Int
         public var restSwaps: Int
 
-        public init(_ frames: [Frame], cases: [LayoutCase] = []) {
+        public init(_ frames: [Frame], cases: [LayoutCase] = [], header: [LegendMeasure] = [], menu: [RepoMenuStyle.Contrast]? = nil) {
             self.frames = frames
+            headerTruncations = HeaderLayout.truncations(HeaderLayout.worstCase() + header)
+            menuChecks = menu ?? RepoMenuStyle.checks()
+            menuContrast = menuChecks.filter(\.fails).count
             layoutCases = cases
             hoveredCount = frames.filter { $0.hovered != nil }.count
             mismatchFrames = frames.filter(\.isMismatch).map(\.frame)
@@ -532,7 +540,8 @@ public enum HoverSweep {
                 + "\(slotFrameShifts) slot frame shifts, \(footerHiddenFrames) footer-hidden frames, "
                 + "\(overlaps) overlaps (\(layoutCases.count) layout cases), "
                 + "\(idleEmptyGapViolations) idle-gap violations (max \(String(format: "%.0f", maxIdleEmptyGap)) pt), "
-                + "\(legendTruncations) legend truncations, \(hoverTransitions) hover transitions (\(hoverSwaps) leaf swaps, \(restSwaps) rest swaps)"
+                + "\(legendTruncations) legend truncations, \(hoverTransitions) hover transitions (\(hoverSwaps) leaf swaps, \(restSwaps) rest swaps), "
+                + "\(headerTruncations) header truncations, \(menuContrast) menu contrast failures"
                 + (mismatches > 0 ? " (frames \(mismatchFrames.map(String.init).joined(separator: ", ")))" : "")
         }
     }
