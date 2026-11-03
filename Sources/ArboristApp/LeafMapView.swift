@@ -1,4 +1,5 @@
 #if os(macOS)
+import ArboristCleanup
 import ArboristCore
 import SwiftUI
 
@@ -37,7 +38,7 @@ struct LeafMapView: View {
             if let h = hovered, let leaf = map.leaves.first(where: { $0.item.id == h }), let ref = WorktreeList.find(result, path: h) {
                 let card = HoverCard(ref)
                 let (x0, y0, x1, y1) = Geo.bbox(leaf.outline)
-                let size = Pt(LeafSVG.cardWidth, LeafSVG.cardHeight(card))
+                let size = Pt(LeafSVG.cardWidth, LeafSVG.cardHeight(card) + 26) // + the Remove worktree row (D14)
                 let o = LeafSVG.cardOrigin(avoiding: Rect(x: x0, y: y0, w: x1 - x0, h: y1 - y0), size: size, in: Pt(map.width, map.height))
                 HoverCardView(card: card, ref: ref)
                     .frame(width: size.x, height: size.y, alignment: .topLeading)
@@ -179,6 +180,7 @@ struct HoverCardView: View {
             }
             .buttonStyle(SubtleButtonStyle())
             .padding(.top, 8)
+            RemoveButton(ref: ref).buttonStyle(SubtleButtonStyle()).padding(.top, 4)
         }
         .padding(10)
         .frame(width: LeafSVG.cardWidth, alignment: .leading)

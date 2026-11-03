@@ -1,11 +1,11 @@
 # Arborist
 
-A small, read-only Mac tool that shows free disk space and how much your dev work uses, with a focus on git worktrees.
+A small Mac tool (read-only CLI; the app can remove safe worktrees after you confirm) that shows free disk space and how much your dev work uses, with a focus on git worktrees.
 
 - **`arborist` CLI**: `arborist scan --json` for agents, `arborist scan` for people, `arborist free`.
 - **ArboristApp**: a small menu bar app (no window). The menu bar leaf wilts as space runs low; the popover is a leaf map of repos, worktrees, deps, caches and free space, with a low-space alert.
 
-It never deletes anything. Per-worktree actions are Reveal in Finder and copying a `git worktree remove` command.
+The CLI never changes anything. In the app, "Clear N" and "Remove worktree" (hover card, or right-click in the List) run `git worktree remove` (no `--force`) and `git worktree prune`, after a confirm sheet. They only work on worktrees that are merged or upstream-gone, with nothing uncommitted or unpushed, and not locked. The main checkout and branches are never touched. Each removal is logged to `~/.config/arborist/cleanup.log`. See D14.
 
 ## Build (macOS 13+, Xcode command line tools)
 

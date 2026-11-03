@@ -53,6 +53,8 @@ public struct Worktree: Codable, Equatable, Sendable {
     public var behind: Int?
     /// Changed plus untracked files, from `git status`.
     public var uncommittedFiles: Int?
+    /// `git worktree lock` was used on it (D14). nil in older scans.
+    public var locked: Bool?
 
     /// One word for the worktree's state, most urgent first (D12).
     public var status: WorktreeStatus {

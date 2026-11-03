@@ -1,5 +1,6 @@
 #if os(macOS)
 import AppKit
+import ArboristCleanup
 import ArboristCore
 import SwiftUI
 
@@ -8,7 +9,6 @@ struct PopoverView: View {
     @EnvironmentObject var model: AppModel
     @State private var hovered: String?
     @State private var showList = false
-    @State private var copied = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -40,15 +40,11 @@ struct PopoverView: View {
             HStack { Key(); Spacer(); Text(model.result.flatMap { Format.cachesTotal($0.caches) } ?? "").font(.system(size: 11)).foregroundColor(Theme.ink2) }
             FreeBar(free: model.freeBytes ?? 0, total: model.result?.volume?.totalBytes ?? 0)
             HStack(spacing: 8) {
-                let n = model.leafMap?.staleCount ?? 0
-                Button(copied ? "Copied" : "Clear \(n)") {
-                    model.copy(model.staleCommands.joined(separator: "\n"))
-                    copied = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
-                }
-                .buttonStyle(DarkButtonStyle())
-                .disabled(n == 0)
-                .help("Read-only: copies \(n) `git worktree remove` commands for the stale worktrees. Nothing is deleted.")
+                let n = model.clearPlan.count
+                Button(model.cleaning ? "Clearing…" : "Clear \(n)") { model.requestClear() }
+                    .buttonStyle(DarkButtonStyle())
+                    .disabled(n == 0 || model.cleaning)
+                    .help("Removes \(n) merged or upstream-gone worktrees with nothing uncommitted or unpushed. Asks first; branches are kept.")
                 Button(model.scanning ? "Scanning…" : "Rescan") { model.rescan() }.disabled(model.scanning)
                 Button(showList ? "Hide list" : "List") { showList.toggle() }
                 Spacer()
@@ -62,10 +58,14 @@ struct PopoverView: View {
             .font(.system(size: 11))
             .foregroundColor(Theme.ink2)
             if showList, let r = model.result { Checklist(result: r, hovered: $hovered).frame(maxHeight: 260) }
+            if let results = model.cleanupResults { CleanupResultsView(results: results) }
         }
         .padding(16)
         .frame(width: 480)
         .background(Theme.paper)
+        .sheet(item: Binding(get: { model.pendingCleanup.map(CleanupBatch.init) }, set: { if $0 == nil { model.pendingCleanup = nil } })) { batch in
+            CleanupConfirmSheet(items: batch.items)
+        }
     }
 
     /// "12/34 repos" while scanning, "Cached · refreshing" for a cached scan, else "Arborist".
@@ -173,15 +173,104 @@ struct WorktreeRow: View {
             if let d = w.lastCommitDate { Text(Format.age(d)).font(.system(size: 10.5)).foregroundColor(Theme.ink3) }
             Text(Format.bytes(w.size.total)).font(.system(size: 11)).monospacedDigit().foregroundColor(Theme.ink2)
             Button("Reveal") { model.reveal(w.path) }.buttonStyle(.link).foregroundColor(Theme.ink2)
-            if let cmd = w.removeCommand {
-                Button("Copy remove") { model.copy(cmd) }.buttonStyle(.link).foregroundColor(Theme.ink2).help(cmd)
-            }
+            RemoveButton(ref: ref, title: "Remove").buttonStyle(.link)
         }
         .font(.system(size: 11))
         .padding(.horizontal, 6).padding(.vertical, 5)
         .background(RoundedRectangle(cornerRadius: 5).fill(highlighted ? Theme.line.opacity(0.7) : .clear))
         .contentShape(Rectangle())
         .help(w.path)
+        .contextMenu {
+            Button("Reveal in Finder") { model.reveal(w.path) }
+            if let cmd = w.removeCommand { Button("Copy remove command") { model.copy(cmd) } }
+            Divider()
+            RemoveButton(ref: ref, title: "Remove worktree…")
+        }
+    }
+}
+
+/// "Remove worktree": enabled only when `Cleanup.blocker` is nil; otherwise disabled with the reason (D14).
+struct RemoveButton: View {
+    @EnvironmentObject var model: AppModel
+    let ref: WorktreeRef
+    var title = "Remove worktree"
+
+    var body: some View {
+        let blocker = Cleanup.blocker(ref.worktree)
+        Button(blocker.map { "\(title) — \($0.reason)" } ?? title) { model.requestRemove(ref) }
+            .disabled(blocker != nil || model.cleaning)
+            .help(blocker?.reason ?? "Runs `git worktree remove` (no --force) after you confirm. The branch is kept.")
+    }
+}
+
+/// Identifiable wrapper so the confirm sheet can be driven by `pendingCleanup`.
+struct CleanupBatch: Identifiable {
+    let items: [CleanupItem]
+    var id: String { items.map(\.id).joined(separator: "|") }
+}
+
+/// Lists exactly what will be removed. Cancel is the default (Return/Escape); Remove has no shortcut.
+struct CleanupConfirmSheet: View {
+    @EnvironmentObject var model: AppModel
+    let items: [CleanupItem]
+
+    var body: some View {
+        let total = items.reduce(Int64(0)) { $0 + ($1.kind == .remove ? $1.bytes : 0) }
+        VStack(alignment: .leading, spacing: 10) {
+            Text(items.count == 1 ? "Remove this worktree?" : "Remove \(items.count) worktrees?")
+                .font(.system(size: 13, weight: .semibold))
+            Text("Runs `git worktree remove` (no --force) then `git worktree prune`. Branches are kept. Each one is checked again first and skipped if it changed.")
+                .font(.system(size: 11)).foregroundColor(Theme.ink2).fixedSize(horizontal: false, vertical: true)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(items) { i in
+                        HStack(alignment: .firstTextBaseline) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("\(i.branch) · \(i.repo)").font(.system(size: 11.5, weight: .medium))
+                                Text(Format.middle(i.path, max: 52)).font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(Theme.ink2).help(i.path)
+                            }
+                            Spacer()
+                            Text(i.kind == .pruneOnly ? "prune only" : Format.bytes(i.bytes))
+                                .font(.system(size: 11)).monospacedDigit().foregroundColor(Theme.ink2)
+                        }
+                    }
+                }
+            }
+            .frame(maxHeight: 240)
+            Divider()
+            HStack {
+                Text("Frees about \(Format.bytes(total))").font(.system(size: 11.5, weight: .medium))
+                Spacer()
+                Button("Cancel", role: .cancel) { model.pendingCleanup = nil }
+                    .keyboardShortcut(.defaultAction)
+                Button(items.count == 1 ? "Remove" : "Remove \(items.count)", role: .destructive) { model.confirmCleanup(items) }
+            }
+        }
+        .padding(16)
+        .frame(width: 420)
+    }
+}
+
+/// Results of the last run and space freed. Dismissable.
+struct CleanupResultsView: View {
+    @EnvironmentObject var model: AppModel
+    let results: [CleanupOutcome]
+
+    var body: some View {
+        let freed = results.reduce(Int64(0)) { $0 + $1.freed }
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text("Freed \(Format.bytes(freed))").font(.system(size: 11.5, weight: .medium))
+                Spacer()
+                Button("Done") { model.cleanupResults = nil }.buttonStyle(.borderless)
+            }
+            ForEach(Array(results.enumerated()), id: \.offset) { _, o in
+                Text(o.summary).font(.system(size: 10.5)).foregroundColor(Theme.ink2).lineLimit(1)
+            }
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Theme.line.opacity(0.5)))
     }
 }
 

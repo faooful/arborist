@@ -194,6 +194,7 @@ public final class Scanner: Sendable {
                          lastCommitDate: nil, dirty: false, unpushedCommits: nil, hasUpstream: false,
                          stale: false, staleReasons: [], size: SizeSplit(),
                          removeCommand: isMain ? nil : "git -C \(Shell.quote(repoPath)) worktree remove \(Shell.quote(p.path))")
+        if p.locked { w.locked = true }
         if p.prunable || !FileManager.default.fileExists(atPath: p.path) {
             w.staleReasons = [.prunable]; w.stale = true
             w.removeCommand = isMain ? nil : "git -C \(Shell.quote(repoPath)) worktree prune"

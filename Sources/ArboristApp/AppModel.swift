@@ -1,5 +1,6 @@
 #if os(macOS)
 import AppKit
+import ArboristCleanup
 import ArboristCore
 import SwiftUI
 import UserNotifications
@@ -50,9 +51,40 @@ final class AppModel: ObservableObject {
     /// Leaf map for the popover, rebuilt as repos arrive (coalesced) and when a scan finishes.
     @Published private(set) var leafMap: LeafMap?
 
-    /// Read-only "Clear": copies the `git worktree remove` commands for every stale worktree.
-    var staleCommands: [String] {
-        (result?.repos ?? []).flatMap(\.worktrees).filter(\.stale).compactMap(\.removeCommand)
+    // MARK: Cleanup (D14). Only reachable from a click in this UI, and always through the confirm sheet.
+
+    /// Worktrees "Clear N" would remove or prune: merged or upstream gone, and nothing uncommitted, unpushed or locked.
+    var clearPlan: [CleanupItem] { result.map(Cleanup.plan) ?? [] }
+    /// Set to show the confirm sheet. Nothing runs until the sheet's Remove button is clicked.
+    @Published var pendingCleanup: [CleanupItem]?
+    /// What happened in the last run, shown until dismissed.
+    @Published var cleanupResults: [CleanupOutcome]?
+    @Published private(set) var cleaning = false
+
+    func requestClear() {
+        let plan = clearPlan
+        if !plan.isEmpty { pendingCleanup = plan }
+    }
+    func requestRemove(_ ref: WorktreeRef) {
+        if let item = Cleanup.item(ref) { pendingCleanup = [item] }
+    }
+    /// Called only by the confirm sheet. Each item is re-checked inside `Cleanup.execute` just before it runs.
+    func confirmCleanup(_ items: [CleanupItem]) {
+        pendingCleanup = nil
+        guard !cleaning, !items.isEmpty else { return }
+        cleaning = true
+        Task.detached(priority: .userInitiated) {
+            var outcomes: [CleanupOutcome] = []
+            for item in items { outcomes.append(Cleanup.execute(item)) }
+            CleanupLog.append(outcomes)
+            let done = outcomes
+            await MainActor.run {
+                self.cleanupResults = done
+                self.cleaning = false
+                self.refreshFree()
+                self.rescan()
+            }
+        }
     }
 
     func rescan() {
