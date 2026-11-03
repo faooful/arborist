@@ -72,6 +72,8 @@ enum HoverSweepRunner {
                 hover.exit(at: t, animated: false)
                 hover.settle(at: t, animated: false)
             }
+            // Instant mode (D16): apply a pending clear right away, as if the grace had passed.
+            if let c = hover.tracker.clearAt { hover.settle(at: max(c, HoverModel.now()), animated: false) }
             settle(host)
             frames.append(HoverSweep.frame(i, pointer: p, last: last, t: t, tracker: hover.tracker, map: map, transform: transform))
             let marker = p.map { tracking.convert(CGPoint(x: transform.toView($0).x, y: transform.toView($0).y), to: host) }

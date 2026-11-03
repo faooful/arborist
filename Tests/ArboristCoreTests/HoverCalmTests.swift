@@ -58,11 +58,11 @@ final class HoverCalmTests: XCTestCase {
         XCTAssertLessThanOrEqual(HoverTracker.leaveDelay, 0.1)
     }
 
-    func testStickyInsideTheMap() throws {
+    func testFarPointKeepsHoverWithinTheGrace() throws {
         let a = try XCTUnwrap(map.leaves.first)
         var t = HoverTracker()
         t.move(to: a.centroid, in: map, at: 0)
-        // A point that hits nothing (beyond the hit radius) doesn't clear: only leaving the map does.
+        // A point that hits nothing doesn't clear at once: only after the grace (D16).
         XCTAssertFalse(t.move(to: Pt(-40, -40), in: map, at: 0.1))
         XCTAssertEqual(t.hovered, a.item.id)
     }
@@ -79,8 +79,8 @@ final class HoverCalmTests: XCTestCase {
         XCTAssertLessThanOrEqual(moves, 4, "card stays anchored across the sweep")
         // The first row (top half) keeps one slot the whole way.
         XCTAssertEqual(Set(origins.prefix(14).map { "\($0.x),\($0.y)" }).count, 1)
-        // No hover is lost inside the map; it clears only after leaving.
-        XCTAssertTrue(frames.dropFirst().dropLast().allSatisfy { $0.hovered != nil })
+        // D16: hover matches the ground truth everywhere (cleared in far gaps after the grace).
+        XCTAssertTrue(frames.allSatisfy { !$0.isMismatch })
         XCTAssertNil(frames.last?.hovered)
     }
 

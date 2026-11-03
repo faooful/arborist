@@ -69,3 +69,12 @@
 - **Hit-test.** Inside an outline, or else the nearest edge within 10 pt (`LeafMap.hit`). It is sticky inside the map and clears 80 ms after the pointer leaves the map. It uses layout outlines only; the 1.03× lift and the shadow are drawing only.
 - **Card.** A corner slot with hysteresis: it moves only when the hovered leaf would sit under it. It slides there and its content cross-fades. Unpinned it lets the pointer through and fades to 0.3 while under the pointer. A click pins it so its buttons work. Reduce Motion: no lift and no slide.
 - **Test hook.** `--hover-sweep DIR` writes PNG frames and frames.json. It runs only in DEBUG builds and only with `ARBORIST_HOVER_SWEEP=1`. It doesn't create the menu bar item and runs with cleanup disabled (asserted). The CLI has `arborist render --hover-sweep DIR` (SVG frames, same frames.json).
+
+## D16: Clear hover in far gaps (2026-11-03)
+
+D15 kept the last leaf hovered anywhere inside the map. The leaf shapes don't fill their cells, so about half of a sweep's points land in gaps, and a leaf stayed lit with the pointer visibly in empty space.
+- **Rule.** When the pointer is in a gap farther than the 10 pt snap radius from every leaf, hover clears after the same 80 ms grace. The deadline is set on entering the gap, so moving around inside it doesn't postpone the clear.
+- **Cancelling.** Re-entering a leaf, or coming within the snap radius, cancels the clear.
+- **Timer.** The app applies the clear with the same single cancellable timer, scheduled for the time remaining until the deadline.
+- **Pinned card.** A pinned card stays until it is unpinned.
+- **Sweep.** The sweep (instant mode) applies a pending clear by advancing time past the grace. In frames.json, `expected = underPointer ?? snappedTo`, and a mismatch is any frame where `hovered != expected`.

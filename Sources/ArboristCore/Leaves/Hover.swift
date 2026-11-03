@@ -43,9 +43,17 @@ public struct HoverTracker: Equatable, Sendable {
     @discardableResult
     public mutating func move(to p: Pt, in map: LeafMap, at t: Double) -> Bool {
         let before = visible
-        clearAt = nil
-        guard !pinned else { return false }
-        if let leaf = map.hit(at: p) { show(leaf, in: map, pointer: p) }
+        guard !pinned else { clearAt = nil; return false }
+        if let leaf = map.hit(at: p) {
+            // On a leaf or within the snap radius: cancels any pending clear.
+            clearAt = nil
+            show(leaf, in: map, pointer: p)
+        } else if hovered != nil {
+            // D16: in a gap farther than the snap radius from every leaf, clear after the grace. The deadline
+            // is set on entering the gap, so moving around inside it doesn't postpone the clear.
+            if clearAt == nil { clearAt = t + Self.leaveDelay }
+            settle(at: t)
+        }
         cardUnderPointer = cardRect?.contains(p) ?? false
         return before != visible
     }
@@ -176,12 +184,27 @@ public enum HoverSweep {
             self.underPointer = underPointer; self.inGap = inGap; self.snappedTo = snappedTo
         }
 
-        /// A frame whose ground truth names a leaf other than the hovered one.
-        public var isMismatch: Bool { underPointer != nil && underPointer != hovered }
+        /// What should be hovered once the grace has passed (D16): the leaf under the pointer, else the
+        /// leaf within the snap radius, else nothing.
+        public var expected: String? { underPointer ?? snappedTo }
+        /// A frame where the hovered leaf differs from the expected one.
+        public var isMismatch: Bool { expected != hovered }
 
         enum CodingKeys: String, CodingKey {
-            case frame, x, y, viewX, viewY, t, hovered, cardShown, cardX, cardY, underPointer, inGap, snappedTo
+            case frame, x, y, viewX, viewY, t, hovered, cardShown, cardX, cardY, underPointer, inGap, snappedTo, expected
         }
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            self.init(frame: try c.decode(Int.self, forKey: .frame), x: try c.decode(Double.self, forKey: .x),
+                      y: try c.decode(Double.self, forKey: .y), viewX: try c.decodeIfPresent(Double.self, forKey: .viewX),
+                      viewY: try c.decodeIfPresent(Double.self, forKey: .viewY), t: try c.decode(Double.self, forKey: .t),
+                      hovered: try c.decodeIfPresent(String.self, forKey: .hovered), cardShown: try c.decode(Bool.self, forKey: .cardShown),
+                      cardX: try c.decodeIfPresent(Double.self, forKey: .cardX), cardY: try c.decodeIfPresent(Double.self, forKey: .cardY),
+                      underPointer: try c.decodeIfPresent(String.self, forKey: .underPointer),
+                      inGap: try c.decodeIfPresent(Bool.self, forKey: .inGap) ?? false,
+                      snappedTo: try c.decodeIfPresent(String.self, forKey: .snappedTo))
+        }
+
         /// Writes `null` for missing values instead of leaving the key out.
         public func encode(to encoder: Encoder) throws {
             var c = encoder.container(keyedBy: CodingKeys.self)
@@ -190,6 +213,7 @@ public enum HoverSweep {
             try c.encode(t, forKey: .t); try c.encode(hovered, forKey: .hovered); try c.encode(cardShown, forKey: .cardShown)
             try c.encode(cardX, forKey: .cardX); try c.encode(cardY, forKey: .cardY)
             try c.encode(underPointer, forKey: .underPointer); try c.encode(inGap, forKey: .inGap); try c.encode(snappedTo, forKey: .snappedTo)
+            try c.encode(expected, forKey: .expected)
         }
     }
 
@@ -197,7 +221,7 @@ public enum HoverSweep {
     public struct Report: Codable, Equatable, Sendable {
         public var frames: [Frame]
         public var hoveredCount: Int
-        /// Frames where `underPointer` is non-null and differs from `hovered`.
+        /// Frames where `hovered` differs from `underPointer ?? snappedTo` (D16).
         public var mismatches: Int
         public var mismatchFrames: [Int]
         /// Frames with the pointer in a gap between outlines.
@@ -265,7 +289,10 @@ public enum HoverSweep {
         for (i, p) in path.enumerated() {
             if let p {
                 tracker.move(to: transform.toMap(transform.toView(p)), in: map, at: t); last = p
-            } else { tracker.exit(at: t); tracker.settle(at: t) }
+            } else { tracker.exit(at: t) }
+            // Instant mode (D16): a pending clear is applied by jumping time past the grace, so each frame
+            // shows the settled state.
+            if let c = tracker.clearAt { t = max(t, c); tracker.settle(at: t) }
             apply(i, tracker)
             frames.append(frame(i, pointer: p, last: last, t: t, tracker: tracker, map: map, transform: transform))
             t += p == nil ? HoverTracker.leaveDelay + 0.01 : step
