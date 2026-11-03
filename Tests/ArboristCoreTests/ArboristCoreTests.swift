@@ -1,7 +1,7 @@
 import XCTest
 @testable import ArboristCore
 
-final class GitParsingTests: XCTestCase {
+final class GitParsingTests: XCTestCase, @unchecked Sendable {
     func testParsesPorcelainWorktreeList() {
         let text = """
         worktree /Users/j/code/app
@@ -58,7 +58,7 @@ final class GitParsingTests: XCTestCase {
     }
 }
 
-final class ClassificationTests: XCTestCase {
+final class ClassificationTests: XCTestCase, @unchecked Sendable {
     func testRebuildableNames() {
         for n in ["node_modules", ".next", "dist", "target", ".venv", "DerivedData", ".build"] { XCTAssertTrue(DiskUsage.isRebuildable(n), n) }
         for n in ["src", "Sources", ".git", "build"] { XCTAssertFalse(DiskUsage.isRebuildable(n), n) }
@@ -111,7 +111,7 @@ final class ClassificationTests: XCTestCase {
 }
 
 /// End-to-end against real git: a repo with a merged worktree and an unmerged dirty one.
-final class ScannerIntegrationTests: XCTestCase {
+final class ScannerIntegrationTests: XCTestCase, @unchecked Sendable {
     func testScanFindsWorktreesAndStaleness() throws {
         guard Shell.run(["git", "--version"]) != nil else { throw XCTSkip("git not installed") }
         let fm = FileManager.default
@@ -149,7 +149,7 @@ final class ScannerIntegrationTests: XCTestCase {
     }
 }
 
-final class BlobLayoutTests: XCTestCase {
+final class BlobLayoutTests: XCTestCase, @unchecked Sendable {
     func testBlobsFitAndDoNotOverlap() {
         let items: [(id: String, label: String, bytes: Int64, kind: Blob.Kind)] = [
             ("a", "a", 900, .project), ("b", "b", 400, .project), ("c", "c", 100, .rebuildable),

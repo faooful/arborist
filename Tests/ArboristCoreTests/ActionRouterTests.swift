@@ -12,7 +12,7 @@ final class FakeEffects: PopoverActionEffects {
 }
 
 /// D22: Settings, Quit, Rescan and List go through the router.
-final class ActionRouterTests: XCTestCase {
+final class ActionRouterTests: XCTestCase, @unchecked Sendable {
     func testSettingsActivatesOpensAndFronts() {
         MainActor.assumeIsolated {
             let f = FakeEffects()

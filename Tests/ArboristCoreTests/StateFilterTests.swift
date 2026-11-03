@@ -4,7 +4,7 @@ import Foundation
 import XCTest
 
 /// D21: legend state filters, "Ready to clean", and the VisibleSet shared by the map and Cleanup.plan.
-final class StateFilterTests: XCTestCase {
+final class StateFilterTests: XCTestCase, @unchecked Sendable {
     let scan = LeafSample.busy
     var worktrees: [Worktree] { scan.repos.flatMap(\.worktrees) }
     func paths(_ r: ScanResult) -> Set<String> { Set(r.repos.flatMap { $0.worktrees.map(\.path) }) }

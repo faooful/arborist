@@ -94,19 +94,28 @@ enum HoverSweepRunner {
                 pinTruth = pinTruth == nil ? pinLeaf : nil
             case .leave:
                 tracking.onExit()
+            case .escape:
+                hover.unpin(); pinTruth = nil
             }
             // Instant mode (D16): apply a pending clear right away.
             if let c = hover.tracker.clearAt { hover.settle(at: max(c, HoverModel.now()), animated: false) }
             settle(host)
+            // D24: what SwiftUI actually drew: the map's frame now, and the strip's measured frames.
+            let mf = tracking.convert(tracking.bounds, to: host)
+            let my = host.isFlipped ? mf.minY : host.bounds.height - mf.maxY
+            let sf = hover.visible.strip == nil ? nil : hover.drawnStripFrames
+            let drawn = HoverSweep.Drawn(mapFrame: Rect(x: mf.minX, y: my, w: mf.width, h: mf.height),
+                                         stripHeight: sf == nil ? 0 : PopoverLayout.stripHeight, stripFrames: sf,
+                                         slotFrame: hover.drawnSlotFrame, footerButtons: hover.drawnFooterButtons)
             frames.append(HoverSweep.frame(i, pointer: p, last: last, t: t, tracker: hover.tracker, map: map, transform: transform,
-                                           pinTruth: pinTruth, reachTarget: i == reachAt))
+                                           pinTruth: pinTruth, reachTarget: i == reachAt, drawn: drawn))
             let marker = p.map { tracking.convert(CGPoint(x: transform.toView($0).x, y: transform.toView($0).y), to: host) }
             capture(host, marker: marker, to: dir + String(format: "/frame-%03d.png", i))
             t += p == nil ? HoverTracker.leaveDelay + 0.01 : 1.0 / 30
             // D22: the popover never resizes on hover.
             if host.fittingSize != sizeBefore { fail("popover resized on hover: \(sizeBefore) → \(host.fittingSize) at frame \(i)") }
         }
-        let report = HoverSweep.Report(frames)
+        let report = HoverSweep.Report(frames, cases: LayoutCase.all(model.result ?? scan, map: map))
         do { try HoverSweep.json(report).write(to: URL(fileURLWithPath: dir + "/frames.json")) } catch { fail("\(error)") }
         precondition(model.pendingCleanup == nil && model.cleanupResults == nil && !model.cleaning, "cleanup must not run")
         window.orderOut(nil)

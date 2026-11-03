@@ -10,7 +10,7 @@ final class EventLog: @unchecked Sendable {
     var all: [ScanEvent] { lock.lock(); defer { lock.unlock() }; return items }
 }
 
-final class ScanProgressTests: XCTestCase {
+final class ScanProgressTests: XCTestCase, @unchecked Sendable {
     private func makeRepos(_ n: Int) throws -> String {
         let fm = FileManager.default
         let base = fm.temporaryDirectory.appendingPathComponent("arborist-prog-\(UUID().uuidString)").path
@@ -113,7 +113,7 @@ final class ScanProgressTests: XCTestCase {
     }
 }
 
-final class TreeSizeTests: XCTestCase {
+final class TreeSizeTests: XCTestCase, @unchecked Sendable {
     /// Bytes for one file as the old code read them. On Linux, swift-corelibs reports allocated size
     /// as st_blocks × st_blksize (8× too big), so the reference uses lstat's st_blocks × 512 there;
     /// the walk itself is the old one unchanged.

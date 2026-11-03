@@ -4,7 +4,7 @@ import XCTest
 
 /// D15: the sweep's ground truth (plain point-in-polygon on drawn outlines in view coordinates) agrees
 /// with what HoverTracker hovers, on the busy sample.
-final class HoverSweepTruthTests: XCTestCase {
+final class HoverSweepTruthTests: XCTestCase, @unchecked Sendable {
     let map: LeafMap = {
         let r = LeafSample.busy
         return LeafLayout.layout(LeafLayout.groups(from: r), staleCount: r.totals.staleWorktrees)
@@ -41,7 +41,12 @@ final class HoverSweepTruthTests: XCTestCase {
         try p.run(); p.waitUntilExit()
         XCTAssertEqual(p.terminationStatus, 0)
         let r = try JSONDecoder().decode(HoverSweep.Report.self, from: Data(contentsOf: dir.appendingPathComponent("frames.json")))
-        XCTAssertEqual(r.frames.count, 58, "48 serpentine + 8 pin-and-reach (D22) + 2 leave")
+        XCTAssertEqual(r.frames.count, 60, "1 idle + 48 serpentine + 8 pin-and-reach (D22) + Esc + 2 leave (D24)")
+        XCTAssertEqual(r.idleStripViolations, 0, r.summary)
+        XCTAssertEqual(r.mapFrameShifts, 0, r.summary)
+        XCTAssertEqual(r.stripLayoutShifts, 0, r.summary)
+        XCTAssertNil(r.frames.first?.strip); XCTAssertEqual(r.frames.first?.stripHeight, 0)
+        XCTAssertNil(r.frames.last?.strip); XCTAssertEqual(r.frames.last?.stripHeight, 0)
         XCTAssertEqual(r.mismatches, 0, r.summary)
         XCTAssertEqual(r.stripMismatches, 0, r.summary)
         XCTAssertEqual(r.reachFailures, 0, r.summary)

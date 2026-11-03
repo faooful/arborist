@@ -2,7 +2,7 @@
 import XCTest
 
 /// D16: in a gap farther than the snap radius from every leaf, hover clears after the 80 ms grace.
-final class GapClearTests: XCTestCase {
+final class GapClearTests: XCTestCase, @unchecked Sendable {
     let map: LeafMap = {
         let r = LeafSample.busy
         return LeafLayout.layout(LeafLayout.groups(from: r), staleCount: r.totals.staleWorktrees)
