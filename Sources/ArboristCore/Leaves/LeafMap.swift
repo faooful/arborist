@@ -21,8 +21,20 @@ public struct LeafItem: Equatable, Sendable {
     public var removeCommand: String?
     /// Number of real items folded into this one (0 for ordinary leaves).
     public var foldedCount: Int = 0
+    /// Share of the map this item asks for. Defaults to `bytes`; worktree leaves use `LeafLayout.weight` (D12).
+    public var weight: Double
+    /// Rebuildable part of `bytes`, drawn as a shaded inner leaf (D12).
+    public var rebuildableBytes: Int64 = 0
+    /// Repo name, shown as the small second label line.
+    public var repo: String?
+    public var status: WorktreeStatus?
     public init(id: String, name: String, bytes: Int64, kind: LeafKind, state: LeafState, path: String? = nil, removeCommand: String? = nil) {
         self.id = id; self.name = name; self.bytes = bytes; self.kind = kind; self.state = state; self.path = path; self.removeCommand = removeCommand
+        self.weight = Double(bytes)
+    }
+    /// Fraction of the leaf drawn as rebuildable, 0…0.9.
+    public var rebuildableShare: Double {
+        bytes > 0 ? min(0.9, max(0, Double(rebuildableBytes) / Double(bytes))) : 0
     }
 }
 
@@ -48,6 +60,10 @@ public struct Leaf: Equatable, Sendable {
     /// Label lines to draw inside the leaf (empty when it doesn't fit).
     public var labelLines: [String]
     public var showSize: Bool
+    /// Rebuildable share: the outline shrunk about its centroid to that share of the area (empty when none).
+    public var inner: [Pt] = []
+    /// Small second line (the repo), when it fits.
+    public var subLabel: String?
 }
 
 public struct GroupLabel: Equatable, Sendable {
@@ -73,44 +89,32 @@ public enum LeafLayout {
 
     // MARK: Data -> groups
 
-    /// One group per repo (largest first, the rest folded into "other repos"), a Caches group, and Free.
-    public static func groups(from r: ScanResult, maxRepos: Int = 5) -> [LeafGroup] {
-        var out: [LeafGroup] = []
-        func repoItems(_ repo: Repo) -> [LeafItem] {
-            var items: [LeafItem] = repo.worktrees.map { w in
-                let state: LeafState = w.stale ? .stale : (w.dirty || (w.unpushedCommits ?? 0) > 0 ? .protected : .clean)
-                return LeafItem(id: w.path, name: w.isMain ? "main" : (w.branch ?? "detached"), bytes: w.size.source,
-                                kind: w.isMain ? .main : .worktree, state: state, path: w.path, removeCommand: w.removeCommand)
-            }
-            if repo.size.rebuildable > 0 {
-                items.append(LeafItem(id: repo.path + "#deps", name: "deps", bytes: repo.size.rebuildable, kind: .deps, state: .deps, path: repo.path))
-            }
-            return items
+    /// Worktree-first (D12): one group per repo, one leaf per worktree including the main checkout.
+    /// Repos with the most worktrees come first. Caches and free space are not leaves.
+    public static func groups(from r: ScanResult) -> [LeafGroup] {
+        let repos = r.repos.filter { !$0.worktrees.isEmpty }.sorted {
+            $0.worktrees.count != $1.worktrees.count ? $0.worktrees.count > $1.worktrees.count : $0.size.total > $1.size.total
         }
-        let repos = r.repos.sorted { $0.size.total > $1.size.total }
-        for repo in repos.prefix(maxRepos) { out.append(LeafGroup(name: repo.name, items: repoItems(repo))) }
-        let rest = repos.dropFirst(maxRepos)
-        if !rest.isEmpty {
-            out.append(LeafGroup(name: "other repos", items: rest.map { repo in
-                let protected = repo.worktrees.contains { $0.dirty || ($0.unpushedCommits ?? 0) > 0 }
-                return LeafItem(id: repo.path, name: repo.name, bytes: repo.size.total, kind: .main, state: protected ? .protected : .clean, path: repo.path)
-            }))
+        return repos.map { repo in
+            LeafGroup(name: repo.name, items: repo.worktrees.map { item(for: $0, repo: repo.name) })
         }
-        if !r.caches.isEmpty {
-            out.append(LeafGroup(name: "Caches", items: r.caches.map {
-                LeafItem(id: "cache:" + $0.name, name: $0.name, bytes: $0.bytes, kind: .cache, state: .clean, path: $0.path)
-            }))
-        }
-        if let v = r.volume {
-            // Free is drawn smaller than its true size (as in H8) so a mostly-empty disk still shows the leaves.
-            let used = out.flatMap(\.items).reduce(Int64(0)) { $0 + $1.bytes }
-            let shown = used > 0 ? min(v.freeBytes, used * 2 / 3) : v.freeBytes
-            var free = LeafItem(id: "free", name: "Free", bytes: shown, kind: .free, state: .free)
-            free.foldedCount = 0
-            out.append(LeafGroup(name: "free", items: [free]))
-        }
-        return out.filter { !$0.items.isEmpty }
     }
+
+    public static func item(for w: Worktree, repo: String) -> LeafItem {
+        let st = w.status
+        let state: LeafState = (st == .uncommitted || st == .unpushed) ? .protected : (st == .clean ? .clean : .stale)
+        var i = LeafItem(id: w.path, name: WorktreeLabel.branchName(w.branch, head: w.head), bytes: w.size.total,
+                         kind: w.isMain ? .main : .worktree, state: state, path: w.path, removeCommand: w.removeCommand)
+        i.rebuildableBytes = w.size.rebuildable
+        i.repo = repo
+        i.status = st
+        i.weight = weight(bytes: w.size.total)
+        return i
+    }
+
+    /// Leaf area for a worktree: grows with the square root of its size, from a floor, so a 20 GB
+    /// checkout is bigger than a 50 MB worktree but every worktree stays visible.
+    public static func weight(bytes: Int64) -> Double { 0.6 + (Double(max(0, bytes)) / 1e9).squareRoot() }
 
     // MARK: Folding
 
@@ -120,19 +124,25 @@ public enum LeafLayout {
     }
 
     /// Items below `minBytes` are folded into one "other" leaf per group; a lone tiny item is padded up to the minimum.
-    public static func fold(_ groups: [LeafGroup], minBytes: Int64) -> [LeafGroup] {
+    public static func fold(_ groups: [LeafGroup], minBytes: Int64) -> [LeafGroup] { fold(groups, minWeight: Double(minBytes)) }
+
+    /// Same as `fold(_:minBytes:)`, on `weight`.
+    public static func fold(_ groups: [LeafGroup], minWeight: Double) -> [LeafGroup] {
         groups.map { g in
             var g = g
-            let small = g.items.filter { $0.bytes < minBytes }
+            let small = g.items.filter { $0.weight < minWeight }
             guard !small.isEmpty else { return g }
             if small.count == 1 {
-                g.items = g.items.map { var i = $0; if i.bytes < minBytes { i.bytes = minBytes }; return i }
+                g.items = g.items.map { var i = $0; if i.weight < minWeight { i.weight = minWeight }; return i }
                 return g
             }
-            g.items = g.items.filter { $0.bytes >= minBytes }
+            g.items = g.items.filter { $0.weight >= minWeight }
             let state: LeafState = small.contains { $0.state == .protected } ? .protected
                 : (small.allSatisfy { $0.state == .stale } ? .stale : .clean)
-            var other = LeafItem(id: g.name + "#other", name: "other", bytes: max(minBytes, small.reduce(0) { $0 + $1.bytes }), kind: .main, state: state)
+            var other = LeafItem(id: g.name + "#other", name: "other", bytes: small.reduce(0) { $0 + $1.bytes }, kind: .main, state: state)
+            other.weight = max(minWeight, small.reduce(0) { $0 + $1.weight })
+            other.rebuildableBytes = small.reduce(0) { $0 + $1.rebuildableBytes }
+            other.repo = small.first?.repo
             other.foldedCount = small.count
             g.items.append(other)
             return g
@@ -144,9 +154,10 @@ public enum LeafLayout {
     public static func layout(_ input: [LeafGroup], width: Double = 448, height: Double = 400,
                               seed: String = defaultSeed, staleCount: Int? = nil) -> LeafMap {
         let marginX = 14.0, marginY = 15.0
-        let total = input.flatMap(\.items).reduce(Int64(0)) { $0 + $1.bytes }
-        guard total > 0 else { return LeafMap(width: width, height: height, leaves: [], groupLabels: [], stipple: [], staleCount: 0) }
-        let groups = fold(input, minBytes: minBytes(total: total, width: width, height: height)).filter { !$0.items.isEmpty }
+        let total = input.flatMap(\.items).reduce(0.0) { $0 + $1.weight }
+        guard total > 0 else { return LeafMap(width: width, height: height, leaves: [], groupLabels: [], stipple: [], staleCount: staleCount ?? 0) }
+        let minW = total * minLeaf * minLeaf / (width * height * 0.82)
+        let groups = fold(input, minWeight: minW).filter { !$0.items.isEmpty }
 
         // Organic outer boundary: a convex superellipse.
         let w = width - marginX, h = height
@@ -157,7 +168,7 @@ public enum LeafLayout {
                             h / 2 + (h / 2 - marginY) * sgn(s) * pow(abs(s), e)))
         }
         var rng = PowerTreemap.Rng(seed: seed)
-        let groupCells = PowerTreemap.split(values: groups.map { Double($0.items.reduce(0) { $0 + $1.bytes }) }, clip: outer, rng: &rng)
+        let groupCells = PowerTreemap.split(values: groups.map { $0.items.reduce(0.0) { $0 + $1.weight } }, clip: outer, rng: &rng)
 
         var leaves: [Leaf] = [], labels: [GroupLabel] = [], stipple: [Pt] = []
         var cid = 0
@@ -166,8 +177,10 @@ public enum LeafLayout {
             guard gpoly.count >= 3 else { continue }
             let gp = Geo.inset(gpoly, 2.6)
             guard gp.count >= 3 else { continue }
-            if !g.isFree { labels.append(groupLabel(g.name, gp, height: height)) }
-            let cells = PowerTreemap.split(values: g.items.map { Double($0.bytes) }, clip: gpoly, rng: &rng)
+            // Repo names label groups of two or more leaves along the map edge; single leaves carry it inside.
+            let edgeLabel = g.isFree ? nil : groupLabel(g.name, gp, height: height)
+            if g.items.count > 1, let l = edgeLabel { labels.append(l) }
+            let cells = PowerTreemap.split(values: g.items.map(\.weight), clip: gpoly, rng: &rng)
             for (ii, item) in g.items.enumerated() {
                 var p = Geo.inset(cells[ii], 2.0)
                 guard p.count >= 3 else { continue }
@@ -188,7 +201,10 @@ public enum LeafLayout {
                     continue
                 }
                 cid += 1
-                leaves.append(shapeLeaf(item, group: g.name, cell: p, cid: cid, mapCentre: Pt(width / 2, height / 2)))
+                let leaf = shapeLeaf(item, group: g.name, cell: p, cid: cid, mapCentre: Pt(width / 2, height / 2))
+                // A lone leaf too small for its repo line gets the repo as an edge label instead.
+                if g.items.count == 1, leaf.subLabel == nil, let l = edgeLabel { labels.append(l) }
+                leaves.append(leaf)
             }
         }
         let stale = staleCount ?? groups.flatMap(\.items).reduce(0) { $0 + ($1.state == .stale ? max(1, $1.foldedCount) : 0) }
@@ -197,8 +213,9 @@ public enum LeafLayout {
 
     static func sgn(_ v: Double) -> Double { v < 0 ? -1 : (v > 0 ? 1 : 0) }
 
-    static func groupLabel(_ name: String, _ gp: [Pt], height: Double) -> GroupLabel {
+    static func groupLabel(_ name: String, _ gp: [Pt], height: Double) -> GroupLabel? {
         let ys = gp.map(\.y), mnY = ys.min()!, mxY = ys.max()!
+        let mnX = gp.map(\.x).min()!
         let top = mnY < 22, bottom = mxY > height - 22
         if top || bottom {
             let edge = top ? mnY : mxY
@@ -206,7 +223,8 @@ public enum LeafLayout {
             let x = pts.reduce(0) { $0 + $1.x } / Double(max(pts.count, 1))
             return GroupLabel(name: name, at: Pt(x, top ? 10 : height - 3), vertical: false)
         }
-        return GroupLabel(name: name, at: Pt(7, (mnY + mxY) / 2), vertical: true)
+        // Vertical only along the left edge; interior groups would stack labels on top of each other.
+        return mnX < 30 ? GroupLabel(name: name, at: Pt(7, (mnY + mxY) / 2), vertical: true) : nil
     }
 
     // MARK: Leaf shaping (port of h8.js)
@@ -265,8 +283,17 @@ public enum LeafLayout {
         var fits = true
         for k in 0...parts.count where Geo.chord(s, y: y0 + Double(k) * 12.5 - 4) < (k < parts.count ? lw : 30) { fits = false }
         let chord = Geo.chord(s, y: c.y)
+        // Repo as a small second line, under the size, when the leaf is wide enough there.
+        var sub: String?
+        if fits, let repo = item.repo, item.foldedCount == 0 {
+            let yRepo = y0 + Double(parts.count + 1) * 12.5 + 4
+            if Geo.chord(s, y: yRepo - 4) > Double(repo.count) * 5.6 + 6 { sub = repo }
+        }
+        // Rebuildable share: the outline scaled about its centroid so its area is that share of the leaf.
+        let share = item.rebuildableShare
+        let inner = share > 0.02 ? outline.map { c + ($0 - c) * share.squareRoot() } : []
         return Leaf(item: item, group: group, outline: outline, veins: veins, centroid: c,
-                    labelLines: fits ? parts : [], showSize: fits || chord > 26)
+                    labelLines: fits ? parts : [], showSize: fits || chord > 26, inner: inner, subLabel: sub)
     }
 
     static func wavy(_ s: [Pt], kind: LeafKind, cid: Int) -> [Pt] {

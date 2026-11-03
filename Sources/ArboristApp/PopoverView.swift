@@ -3,18 +3,20 @@ import AppKit
 import ArboristCore
 import SwiftUI
 
-/// The whole app: a 480pt popover under the menu bar item, in the H8 "leaves" design (D9).
+/// The whole app: a 480pt popover under the menu bar item. Worktree-first leaves (D9, D12).
 struct PopoverView: View {
     @EnvironmentObject var model: AppModel
-    @State private var picked: LeafItem?
+    @State private var hovered: String?
     @State private var showList = false
     @State private var copied = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(bigNumber).font(.system(size: 30, weight: .light)).foregroundColor(Theme.ink)
-                Text("GB free").font(.system(size: 13)).foregroundColor(Theme.ink2)
+                // "40 worktrees in 34 repos · 5 stale"
+                let parts = (model.result?.headline ?? "— worktrees").split(separator: " ", maxSplits: 2).map(String.init)
+                Text(parts.prefix(2).joined(separator: " ")).font(.system(size: 22, weight: .regular)).foregroundColor(Theme.ink)
+                if parts.count > 2 { Text(parts[2]).font(.system(size: 13)).foregroundColor(Theme.ink2) }
                 Spacer()
                 Text(statusText).font(.system(size: 11.5)).foregroundColor(Theme.ink2)
                     .accessibilityLabel(statusText)
@@ -29,13 +31,15 @@ struct PopoverView: View {
                 .padding(8)
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color(hex: LeafPalette.fill(.stale)).opacity(0.35)))
             }
-            if let map = model.leafMap {
-                LeafMapView(map: map, freeBytes: model.freeBytes ?? 0, selection: $picked)
+            if let map = model.leafMap, let r = model.result {
+                LeafMapView(map: map, result: r, hovered: $hovered)
+                if let line = Format.cachesLine(r.caches) {
+                    Text(line).font(.system(size: 10.5)).foregroundColor(Theme.ink2).lineLimit(1)
+                }
             } else {
                 Text(model.scanning ? "Looking for repositories and worktrees…" : (model.scanError == nil ? "No scan yet" : "No results"))
                     .font(.system(size: 11)).foregroundColor(Theme.ink2).frame(width: 448, height: 120)
             }
-            if let item = picked, item.kind != .free { SelectedRow(item: item) }
             Key()
             FreeBar(free: model.freeBytes ?? 0, total: model.result?.volume?.totalBytes ?? 0)
             HStack(spacing: 8) {
@@ -60,7 +64,7 @@ struct PopoverView: View {
             .buttonStyle(.borderless)
             .font(.system(size: 11))
             .foregroundColor(Theme.ink2)
-            if showList, let r = model.result { Checklist(result: r).frame(maxHeight: 260) }
+            if showList, let r = model.result { Checklist(result: r, hovered: $hovered).frame(maxHeight: 260) }
         }
         .padding(16)
         .frame(width: 480)
@@ -74,34 +78,13 @@ struct PopoverView: View {
         return "Arborist"
     }
 
-    private var bigNumber: String {
-        guard let f = model.freeBytes else { return "—" }
-        return String(format: "%.0f", Double(f) / 1e9)
-    }
-}
-
-/// The tapped leaf, with the v1 read-only actions.
-struct SelectedRow: View {
-    @EnvironmentObject var model: AppModel
-    let item: LeafItem
-    var body: some View {
-        HStack(spacing: 8) {
-            Text(item.foldedCount > 0 ? "other (\(item.foldedCount) small items)" : item.name)
-                .font(.system(size: 11, weight: .medium)).foregroundColor(Theme.ink).lineLimit(1)
-            Text("\(Format.bytes(item.bytes)) · \(item.state.rawValue)").font(.system(size: 11)).foregroundColor(Theme.ink2)
-            Spacer()
-            if let p = item.path { Button("Reveal in Finder") { model.reveal(p) } }
-            if let cmd = item.removeCommand { Button("Copy remove command") { model.copy(cmd) }.help(cmd) }
-        }
-        .buttonStyle(.borderless).font(.system(size: 11)).foregroundColor(Theme.ink)
-    }
 }
 
 struct Key: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 12) {
-                ForEach([(LeafState.protected, "Protected"), (.clean, "Clean"), (.stale, "Stale"), (.deps, "Deps"), (.free, "Free")], id: \.1) { st, name in
+                ForEach([(LeafState.protected, "Uncommitted / unpushed"), (.clean, "Clean"), (.stale, "Merged / stale")], id: \.1) { st, name in
                     HStack(spacing: 5) {
                         RoundedRectangle(cornerRadius: 2.5).fill(Color(hex: LeafPalette.fill(st))).frame(width: 9, height: 9)
                         Text(name)
@@ -109,8 +92,13 @@ struct Key: View {
                 }
             }
             HStack(spacing: 12) {
-                ForEach([(LeafKind.worktree, "Worktree"), (.main, "Main"), (.cache, "Cache"), (.deps, "Deps")], id: \.1) { _, name in
-                    Text(name)
+                Text("Worktree"); Text("Main checkout")
+                HStack(spacing: 5) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 4).fill(Color(hex: LeafPalette.fill(.clean))).frame(width: 18, height: 10)
+                        RoundedRectangle(cornerRadius: 2.5).fill(Color(hex: LeafPalette.rebuildableShade, opacity: LeafPalette.rebuildableOpacity(.clean) * 1.6)).frame(width: 10, height: 5)
+                    }
+                    Text("Rebuildable (node_modules, .build…)")
                 }
             }
         }
@@ -158,83 +146,56 @@ struct PlainPillStyle: ButtonStyle {
     }
 }
 
-/// Quiet checklist: projects (largest first) with worktrees, then shared caches.
+/// Every worktree, sorted by state (uncommitted, unpushed, merged, stale, clean) then newest first.
+/// Hovering a row highlights its leaf, and hovering a leaf highlights its row.
 struct Checklist: View {
     @EnvironmentObject var model: AppModel
     let result: ScanResult
+    @Binding var hovered: String?
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                let maxBytes = max(1, result.repos.first?.size.total ?? 1)
-                ForEach(result.repos, id: \.path) { repo in
-                    RepoRow(repo: repo, maxBytes: maxBytes)
-                }
-                if !result.caches.isEmpty {
-                    Text("Shared caches").font(.caption.weight(.semibold)).foregroundColor(Theme.ink3)
-                        .padding(.top, 14).padding(.bottom, 4)
-                    ForEach(result.caches, id: \.name) { c in
-                        Row(selected: model.selection == c.path, title: c.name, detail: nil, bytes: c.bytes, rebuildable: c.bytes, fraction: nil)
-                            .onTapGesture { model.selection = c.path }
-                            .contextMenu { if let p = c.path { Button("Reveal in Finder") { model.reveal(p) } } }
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(WorktreeList.sorted(result), id: \.worktree.path) { ref in
+                        WorktreeRow(ref: ref, highlighted: hovered == ref.worktree.path)
+                            .id(ref.worktree.path)
+                            .onHover { inside in
+                                if inside { hovered = ref.worktree.path } else if hovered == ref.worktree.path { hovered = nil }
+                            }
                     }
                 }
             }
-        }
-    }
-}
-
-struct RepoRow: View {
-    @EnvironmentObject var model: AppModel
-    let repo: Repo
-    let maxBytes: Int64
-    @State private var open = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Row(selected: model.selection == repo.path, title: repo.name,
-                detail: repo.worktrees.count > 1 ? "\(repo.worktrees.count) worktrees" : nil,
-                bytes: repo.size.total, rebuildable: repo.size.rebuildable,
-                fraction: Double(repo.size.total) / Double(maxBytes), disclosure: open)
-                .onTapGesture { model.selection = repo.path; open.toggle() }
-                .contextMenu { Button("Reveal in Finder") { model.reveal(repo.path) } }
-            if open {
-                ForEach(repo.worktrees, id: \.path) { w in WorktreeRow(repoPath: repo.path, w: w) }
-            }
+            .onChange(of: hovered) { h in if let h { withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(h) } } }
         }
     }
 }
 
 struct WorktreeRow: View {
     @EnvironmentObject var model: AppModel
-    let repoPath: String
-    let w: Worktree
+    let ref: WorktreeRef
+    let highlighted: Bool
+    private var w: Worktree { ref.worktree }
 
     var body: some View {
         HStack(spacing: 8) {
-            Text(w.branch ?? "detached").font(.system(.body, design: .monospaced)).foregroundColor(w.stale ? Theme.ink3 : Theme.ink)
-            Text(flags).font(.caption).foregroundColor(Theme.ink3)
+            Circle().fill(Color(hex: LeafPalette.dot(w.status))).frame(width: 7, height: 7)
+            Text(WorktreeLabel.branchName(w.branch, head: w.head)).font(.system(size: 11.5, weight: .medium)).foregroundColor(Theme.ink).lineLimit(1)
+            Text(ref.repo + (w.isMain ? " · main" : "")).font(.system(size: 10.5)).foregroundColor(Theme.ink3).lineLimit(1)
+            Text(w.status.word).font(.system(size: 10.5)).foregroundColor(Theme.ink2)
             Spacer()
-            Text(Format.bytes(w.size.total)).monospacedDigit().foregroundColor(Theme.ink2)
+            if let d = w.lastCommitDate { Text(Format.age(d)).font(.system(size: 10.5)).foregroundColor(Theme.ink3) }
+            Text(Format.bytes(w.size.total)).font(.system(size: 11)).monospacedDigit().foregroundColor(Theme.ink2)
             Button("Reveal") { model.reveal(w.path) }.buttonStyle(.link).foregroundColor(Theme.ink2)
             if let cmd = w.removeCommand {
-                Button("Copy remove command") { model.copy(cmd) }.buttonStyle(.link).foregroundColor(Theme.ink2)
-                    .help(cmd)
+                Button("Copy remove") { model.copy(cmd) }.buttonStyle(.link).foregroundColor(Theme.ink2).help(cmd)
             }
         }
-        .padding(.leading, 30).padding(.vertical, 5)
+        .font(.system(size: 11))
+        .padding(.horizontal, 6).padding(.vertical, 5)
+        .background(RoundedRectangle(cornerRadius: 5).fill(highlighted ? Theme.line.opacity(0.7) : .clear))
+        .contentShape(Rectangle())
         .help(w.path)
-    }
-
-    private var flags: String {
-        var f: [String] = []
-        if w.isMain { f.append("main") }
-        if let d = w.lastCommitDate { f.append(d.formatted(.relative(presentation: .named))) }
-        if w.dirty { f.append("dirty") }
-        if let n = w.unpushedCommits, n > 0 { f.append("\(n) unpushed") }
-        if !w.hasUpstream && w.branch != nil && !w.isMain { f.append("no upstream") }
-        if w.stale { f.append("stale (" + w.staleReasons.map(\.label).joined(separator: ", ") + ")") }
-        return f.joined(separator: " · ")
     }
 }
 
@@ -244,44 +205,4 @@ extension StaleReason {
     }
 }
 
-struct Row: View {
-    var selected: Bool
-    var title: String
-    var detail: String?
-    var bytes: Int64
-    var rebuildable: Int64
-    var fraction: Double?
-    var disclosure: Bool? = nil
-
-    var body: some View {
-        VStack(spacing: 4) {
-            HStack(spacing: 10) {
-                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .foregroundColor(selected ? Theme.ink : Theme.line)
-                Text(title).foregroundColor(Theme.ink)
-                if let detail { Text(detail).font(.caption).foregroundColor(Theme.ink3) }
-                Spacer()
-                if rebuildable > 0 && rebuildable != bytes {
-                    Text("\(Format.bytes(rebuildable)) rebuildable").font(.caption).foregroundColor(Theme.ink3)
-                }
-                Text(Format.bytes(bytes)).monospacedDigit().foregroundColor(Theme.ink)
-            }
-            if let fraction {
-                GeometryReader { g in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Theme.line.opacity(0.5))
-                        Capsule().fill(Theme.ink2).frame(width: g.size.width * fraction)
-                        Capsule().fill(Theme.ink3.opacity(0.5))
-                            .frame(width: g.size.width * fraction * Double(rebuildable) / Double(max(bytes, 1)))
-                    }
-                }
-                .frame(height: 3)
-                .padding(.leading, 26)
-            }
-        }
-        .padding(.vertical, 6)
-        .contentShape(Rectangle())
-        .overlay(alignment: .bottom) { Rectangle().fill(Theme.line.opacity(0.6)).frame(height: 0.5) }
-    }
-}
 #endif
