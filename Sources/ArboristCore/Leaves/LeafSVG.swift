@@ -21,7 +21,6 @@ public enum LeafSVG {
     public static func popover(_ r: ScanResult, map: LeafMap, note: String = "Linux render", hover: String? = nil, pinned: String? = nil,
                                now: Date = Date(), pointer: Pt? = nil, showAll: Bool = false,
                                filterLabel: String? = nil, status: String = "", menu: [RepoMenuRow]? = nil) -> String {
-        let freeBytes = r.volume?.freeBytes ?? 0, totalBytes = r.volume?.totalBytes ?? 0
         let pad = svgPad, mapTop = svgMapTop, size = svgSize(map), w = size.x, h = size.y
         let space = popoverSpace(map)
         // D24: one shared slot below the map: legend + storage bar at rest, the leaf details on hover or pin

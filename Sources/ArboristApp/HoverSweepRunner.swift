@@ -1,5 +1,6 @@
 #if os(macOS) && DEBUG
 import AppKit
+import ArboristCleanup
 import ArboristCore
 import SwiftUI
 
@@ -158,6 +159,112 @@ enum HoverSweepRunner {
         settle(host)
         print("repo menu: frame \(f), sampled background \(hex)")
         return checks
+    }
+
+    /// D27 `--confirm-check`: opens the single-worktree confirm and the Clear N confirm in the real PopoverView
+    /// (key window, offscreen), and for each: hit-tests the drawn Cancel/Remove frames against the map and footer
+    /// (Core `HitOrder` on the frames AppKit laid out), clicks each button with real mouse events, clicks the map
+    /// beneath (must do nothing), and presses Esc and Return. Cleanup stays disabled: Remove is recorded by a hook.
+    static func confirmCheck() {
+        let limit = deadlineSeconds
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + limit) {
+            FileHandle.standardError.write(Data("confirm-check: timed out after \(Int(limit)) s\n".utf8))
+            exit(2)
+        }
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.accessory)
+        NSApp.finishLaunching()
+        let scan = ScanCache.load() ?? Scanner(config: ArboristConfig.load()).scan()
+        let model = AppModel(sweepWith: scan)
+        precondition(model.cleanupDisabled, "confirm-check must run with cleanup disabled")
+        if let st = requestedValue(for: "--state"), !model.applyStateList(st) { fail("bad --state \(st)") }
+        var confirmed: [[CleanupItem]] = []
+        model.confirmHook = { confirmed.append($0) }
+        model.hover.instant = true
+        let host = NSHostingView(rootView: PopoverView().environmentObject(model).environmentObject(model.hover))
+        host.frame.size = host.fittingSize
+        let window = KeyableWindow(contentRect: NSRect(origin: NSPoint(x: -10_000, y: -10_000), size: host.fittingSize),
+                                   styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        settle(host)
+        guard let tracking = findTracking(in: host) else { fail("map tracking view not found") }
+        let mapFrame = tracking.convert(tracking.bounds, to: host)
+        let map = Rect(x: mapFrame.minX, y: mapFrame.minY, w: mapFrame.width, h: mapFrame.height)
+        let footer = model.hover.drawnFooterButtons ?? []
+        func log(_ s: String) { print("confirm-check: " + s) }
+        var failures = 0
+        func check(_ ok: Bool, _ what: String) { log((ok ? "ok   " : "FAIL ") + what); if !ok { failures += 1 } }
+
+        func item(_ name: String, _ bytes: Int64, _ kind: CleanupItem.Kind) -> CleanupItem {
+            CleanupItem(repo: "grove", repoPath: "/tmp/grove", path: "/tmp/grove-wt/\(name)", branch: name, head: nil, bytes: bytes, kind: kind)
+        }
+        let cases: [(String, [CleanupItem])] = [
+            ("single", [item("codex/native-hosting-resume", 0, .pruneOnly)]),
+            ("clear 3", [item("a", 1_200_000_000, .remove), item("b", 300_000_000, .remove), item("c", 0, .pruneOnly)]),
+        ]
+        func point(_ r: Rect) -> NSPoint {
+            let x = r.x + r.w / 2, y = r.y + r.h / 2
+            return NSPoint(x: x, y: host.isFlipped ? host.bounds.height - y : y) // window coordinates are y-up
+        }
+        func click(_ r: Rect) {
+            for t in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                if let e = NSEvent.mouseEvent(with: t, location: point(r), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                              windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) {
+                    window.sendEvent(e)
+                }
+                settle(host)
+            }
+        }
+        func key(_ code: UInt16, _ chars: String) {
+            for t in [NSEvent.EventType.keyDown, .keyUp] {
+                if let e = NSEvent.keyEvent(with: t, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                            windowNumber: window.windowNumber, context: nil, characters: chars,
+                                            charactersIgnoringModifiers: chars, isARepeat: false, keyCode: code) {
+                    window.sendEvent(e)
+                }
+                settle(host)
+            }
+        }
+        func open(_ items: [CleanupItem]) -> [(name: String, rect: Rect)] {
+            model.pendingCleanup = items
+            settle(host); settle(host)
+            return model.hover.drawnConfirmButtons ?? []
+        }
+
+        for (name, items) in cases {
+            let buttons = open(items)
+            check(buttons.count == 2, "\(name): Cancel and Remove drawn \(buttons.map { "\($0.name) \($0.rect)" })")
+            let layers = HitOrder.popover(size: Pt(host.bounds.width, host.bounds.height), map: map, footer: footer, confirm: buttons)
+            check(HitOrder.failures(layers, buttons: buttons).isEmpty, "\(name): hit order reaches both buttons")
+            for b in buttons {
+                let p = point(b.rect)
+                let hit = host.hitTest(host.superview.map { host.convert(p, to: $0) } ?? p)
+                log("\(name): AppKit hitTest at \(b.name) → \(hit.map { String(describing: type(of: $0)) } ?? "nil")")
+            }
+            // The map beneath must ignore a click while the confirm is open.
+            let pinned0 = model.hover.visible.pinned
+            click(Rect(x: map.x + 4, y: map.y + 4, w: 2, h: 2))
+            check(model.pendingCleanup != nil && model.hover.visible.pinned == pinned0, "\(name): map click ignored, confirm still open")
+            if let cancel = buttons.first(where: { $0.name == "Cancel" }) {
+                click(cancel.rect)
+                check(model.pendingCleanup == nil && confirmed.isEmpty, "\(name): Cancel click closes, nothing removed")
+            }
+            let buttons2 = open(items)
+            if let remove = buttons2.first(where: { $0.name == "Remove" }) {
+                click(remove.rect)
+                check(model.pendingCleanup == nil && confirmed.last == items, "\(name): Remove click confirms \(items.count)")
+            }
+            confirmed.removeAll()
+            _ = open(items); key(53, "\u{1b}")
+            check(model.pendingCleanup == nil && confirmed.isEmpty, "\(name): Esc cancels")
+            _ = open(items); key(36, "\r")
+            check(model.pendingCleanup == nil && confirmed.last == items, "\(name): Return confirms")
+            confirmed.removeAll()
+        }
+        log("\(failures) failures")
+        exit(failures == 0 ? 0 : 1)
     }
 
     /// `--action-check` (D22): runs Settings, Quit (dry run), Rescan and List through the real router and
@@ -331,6 +438,12 @@ enum HoverSweepRunner {
         }
         guard let png = rep.representation(using: .png, properties: [:]) else { fail("PNG encode failed") }
         do { try png.write(to: URL(fileURLWithPath: path)) } catch { fail("\(error)") }
+    }
+
+    /// D27: a borderless window that can be key, so the confirm's Esc/Return shortcuts receive key events.
+    final class KeyableWindow: NSWindow {
+        override var canBecomeKey: Bool { true }
+        override var canBecomeMain: Bool { true }
     }
 
     private static func fail(_ m: String) -> Never {

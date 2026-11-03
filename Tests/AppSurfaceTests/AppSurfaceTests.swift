@@ -39,6 +39,12 @@ final class AppSurfaceTests: XCTestCase, @unchecked Sendable {
              RepoMenuStyle.name, RepoMenuStyle.count, RepoMenuStyle.hint, RepoMenuStyle.selectedCheck, RepoMenuStyle.uncheckedBox)
         _ = RepoMenuStyle.Contrast(what: "x", fg: "#000000", bg: "#ffffff", ratio: 21, minimum: 4.5)
         _ = HoverSweep.Report([], header: [LegendMeasure(label: "x", natural: 1, frame: Rect(x: 0, y: 0, w: 2, h: 2))], menu: mc).headerTruncations
+        // D27: confirm overlay hit order and wording.
+        let cb = ConfirmLayout.buttons(panel: Rect(x: 0, y: 0, w: ConfirmLayout.width, h: 100))
+        let hl = HitOrder.popover(size: Pt(480, 644), map: Rect(x: 0, y: 0, w: 1, h: 1), footer: [], confirm: cb)
+        _ = (HitOrder.failures(hl, buttons: cb), HitOrder.topmost(at: Pt(1, 1), in: hl)?.name, ConfirmLayout.zIndex, ConfirmLayout.cancelWidth,
+             ConfirmLayout.removeWidth, ConfirmLayout.buttonHeight, ConfirmLayout.padding, ConfirmWording.pruneTag,
+             ConfirmWording.summary(bytes: [0], pruneOnly: [true]), HitLayer(name: "x", z: 0, frame: Rect(x: 0, y: 0, w: 1, h: 1)).hitTesting)
         // D24
         let drawn = HoverSweep.Drawn(mapFrame: Rect(x: 0, y: 0, w: 1, h: 1), stripHeight: 0, stripFrames: nil)
         _ = (StripLayout.row("title"), HoverSweep.Step.escape,
