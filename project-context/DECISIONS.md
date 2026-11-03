@@ -136,3 +136,11 @@ card before the pointer got there; unpinned, the card also let clicks through to
 - **Motion and layout.** The cross-fade and Reduce Motion handling are the same as D18, and the map stays 448×400. If the filters leave nothing, the same box shows "Nothing matches" with a Show all button.
 - **Hooks.** `--state ready|uncommitted|clean|stale[,..]` works on the app's `--snapshot` and `--hover-sweep` and on CLI `render`/`--hover-sweep`, combined with `--filter`.
 - **Card reach.** Each sweep frame has `cardReachFailure`: the card is clipped, or it sits over the pointer so the click meant to pin the leaf would land on the card. The report counts these as `cardReachFailures`, expected 0. With very large leaves (e.g. `--state ready` on one repo) no spot clears the leaf, so `CardPlacement` now also takes the pointer and picks the least-overlap spot, including the popover's corners, that leaves the pointer free.
+
+## D22: Pointer tooltip + docked detail strip (2026-11-03)
+Supersedes D19 and D20. The floating hover card is gone.
+- Tooltip (branch, repo, size) follows the pointer at a 12 pt offset, flips at edges, is clamped inside the popover, and never takes hit-testing (Core `TooltipPlacement`).
+- Fixed-height (118 pt) detail strip docked below the 448×400 map shows the full card for the hovered leaf, live; click pins, Esc or empty-space click unpins; hint when idle. Popover never resizes. Buttons sit at Core `StripLayout` frames; Remove keeps its confirm and safety checks.
+- Hovered leaf gets a 2 pt dark ring (#1f2a1a), pinned 3.5 pt; others dim to 0.92; Reduce Motion respected. No corridor, grace or dwell; hover still works while pinned.
+- All buttons share `HoverButtonStyle` (hover/pressed, pointing hand, disabled greyed). Settings/Quit are gear/power icon buttons; Settings, Quit, Rescan and List go through Core `PopoverActionRouter` (`PopoverActionEffects` seam, fake-tested). Settings: `.regular` + activate, `openSettings` (14+) or `showSettingsWindow:` (13), then front the window or open a fallback; back to `.accessory` on close.
+- Sweep asserts `tooltipClipped`, `stripMismatches`, `mismatches`, `reachFailures` = 0; `--action-check` debug hook (never quits).
