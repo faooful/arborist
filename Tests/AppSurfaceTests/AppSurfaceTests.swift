@@ -88,8 +88,10 @@ final class SurfaceEffects: PopoverActionEffects {
 }
 
 final class AppActionSurfaceTests: XCTestCase {
-    @MainActor func testRouterIsPublic() async {
-        let r = PopoverActionRouter(effects: SurfaceEffects(), dryRunQuit: true, osMajor: 14)
-        _ = (r.dryRunQuit, r.osMajor, r.isEnabled(.rescan), r.perform(.list))
+    func testRouterIsPublic() {
+        MainActor.assumeIsolated {
+            let r = PopoverActionRouter(effects: SurfaceEffects(), dryRunQuit: true, osMajor: 14)
+            _ = (r.dryRunQuit, r.osMajor, r.isEnabled(.rescan), r.perform(.list))
+        }
     }
 }
