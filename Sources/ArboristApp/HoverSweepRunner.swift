@@ -285,6 +285,58 @@ enum HoverSweepRunner {
         exit(failures == 0 ? 0 : 1)
     }
 
+    /// D28 `--remove-trial`: creates a throwaway repo under a temp dir with one merged worktree at
+    /// /tmp/arborist-trial-remove, scans only that, hosts the real PopoverView, and removes the worktree through
+    /// the app path (`confirmCleanup` → `Cleanup.execute` → `applyRemovals`). Asserts the leaf is gone in the
+    /// first frame after the removal finishes, then that the confirming `git worktree list` keeps it gone.
+    /// Touches nothing but its own temp repo; never writes the scan cache.
+    static func removeTrial() {
+        let limit = deadlineSeconds
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + limit) {
+            FileHandle.standardError.write(Data("remove-trial: timed out after \(Int(limit)) s\n".utf8))
+            exit(2)
+        }
+        func log(_ s: String) { print("remove-trial: " + s) }
+        var failures = 0
+        func check(_ ok: Bool, _ what: String) { log((ok ? "ok   " : "FAIL ") + what); if !ok { failures += 1 } }
+        let base = NSTemporaryDirectory() + "arborist-trial-\(UUID().uuidString)"
+        let wtPath = "/tmp/arborist-trial-remove"
+        defer { try? FileManager.default.removeItem(atPath: base) }
+        guard let t = TrialRepo.make(in: base, worktree: wtPath) else { fail("could not create the trial repo") }
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.prohibited)
+        let scan = Scanner(config: ArboristConfig(roots: [base], lowSpaceThresholdGB: 1, maxDepth: 3)).scan()
+        let model = AppModel(sweepWith: scan, allowCleanup: true)
+        model.hover.instant = true
+        let host = NSHostingView(rootView: PopoverView().environmentObject(model).environmentObject(model.hover))
+        host.frame.size = host.fittingSize
+        let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -10_000, y: -10_000), size: host.fittingSize),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host
+        window.orderFrontRegardless()
+        settle(host)
+        func hasLeaf() -> Bool { model.leafMap?.leaves.contains { URL(fileURLWithPath: $0.item.id).resolvingSymlinksInPath().path == URL(fileURLWithPath: t.worktree).resolvingSymlinksInPath().path } ?? false }
+        check(hasLeaf(), "trial leaf on the map before removal")
+        let count0 = model.result?.worktreeCount ?? 0, ready0 = model.clearPlan.count
+        guard let ref = WorktreeList.find(scan, path: t.worktree), let item = Cleanup.item(ref) else { fail("trial worktree not ready to clean") }
+        model.confirmCleanup([item])
+        let end = Date().addingTimeInterval(20)
+        while model.cleanupResults == nil && Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
+        check(model.cleanupResults?.first?.succeeded == true, "git removed it: \(model.cleanupResults?.first?.summary ?? "no result")")
+        // The very next frame: one layout pass, no rescan yet.
+        settle(host)
+        capture(host, marker: nil, to: base + "/after.png")
+        check(!hasLeaf(), "leaf gone in the next frame")
+        check(model.result?.worktreeCount == count0 - 1, "worktree count \(count0) → \(model.result?.worktreeCount ?? -1)")
+        check(model.clearPlan.count == ready0 - 1, "Clear N \(ready0) → \(model.clearPlan.count)")
+        check(model.hover.visible.pinned == nil && model.hover.visible.strip == nil, "no pin or strip on the removed leaf")
+        while model.removalsConfirmed == 0 && Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
+        check(model.removalsConfirmed == 1 && model.reappeared.isEmpty && !hasLeaf(), "rescan of the repo confirms it is gone")
+        check(!FileManager.default.fileExists(atPath: t.worktree), "folder gone on disk")
+        log("\(failures) failures")
+        exit(failures == 0 ? 0 : 1)
+    }
+
     /// `--action-check` (D22): runs Settings, Quit (dry run), Rescan and List through the real router and
     /// AppModel, and logs what fired. Settings logs whether a Settings window appeared and became key / front.
     /// Never quits; cleanup disabled; no menu bar item (the App scene isn't created, so Settings uses the

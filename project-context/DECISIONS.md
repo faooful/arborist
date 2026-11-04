@@ -188,3 +188,18 @@ Supersedes D22's pointer tooltip (and the "Pinned · Esc" label from D22/D24). D
 **D27b (Mac confirm-check: Remove click failed, Return worked).** Cancel and Remove were laid out the same way and reached the same hit order. The only difference was that Remove was the system bordered `role: .destructive` button with `.keyboardShortcut(.defaultAction)`. That made it the window's default button: Return fired it through the key-equivalent path, but its click went through AppKit's default-button mouse tracking and never fired. It wasn't a hit-order, disabled-state or async-read problem: Return calls the same synchronous `confirmCleanup`, and that passed.
 - **Fix:** Cancel and Remove are plain `HoverButtonStyle` buttons with no role and no shortcut, so each fires on click. Esc and Return are bound on separate hidden buttons. Every input goes through one `perform(ConfirmAction)` path (Core `ConfirmInput` → `ConfirmAction`).
 - **Harness:** each click now queues its mouseUp before dispatching the mouseDown, as a real click arrives, and the check polls for up to 0.5 s. It also adds a "first click on Remove" check on a fresh confirm. The checks are not loosened: Remove must still fire from a click.
+
+## D28: Instant removal: optimistic model update, confirmed by a re-list (2026-11-04)
+
+**Problem.** After Remove or Clear N, the leaf stayed on the map until a full rescan finished.
+
+**Decision.**
+- **Optimistic removal:** each item git removed or pruned leaves `ScanResult` at once (`OptimisticRemoval.apply`). The map is re-laid out and the counts, Clear N, Ready, totals and scan cache all follow from that one value. Failed or skipped items stay on the map, with their reasons in the results.
+- **Exit animation:** the removed leaves fade and shrink over 0.2 s as an overlay drawn with their old transform (`ExitGhost`). The overlay is never hit-testable, and there is none with Reduce Motion or in hook modes.
+- **Selection:** a hover, pin, strip or selection on a removed leaf is cleared.
+- **Confirmation:** instead of a full rescan, a background `git worktree list` runs for only the affected repos (`OptimisticRemoval.confirm`). A worktree git still lists is put back at its old position and flagged in the results ("Still listed by git, restored"). If the list itself fails, nothing is decided.
+- **Hook modes:** they never write the scan cache or the cleanup log.
+- **Header gap:** the count and stale texts report their drawn natural widths, and `HeaderLayout.tightened` moves the following frames left by the padding the width estimate added. Frames only move left and keep their widths, so nothing truncates, and the status icon stays put.
+- **Checks:**
+  - Core: `OptimisticRemovalTests` (a real git removal, rollback, a failed list, the main checkout never dropped, header tightening).
+  - App: DEBUG `--remove-trial` via `scripts/remove-trial.sh`. It builds a throwaway repo with a merged worktree at /tmp/arborist-trial-remove and removes it through the app path. It then asserts the leaf is gone in the next frame, the counts and Clear N drop, no pin or strip remains, the re-list confirms the removal, and the folder is gone.

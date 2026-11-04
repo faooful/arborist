@@ -80,6 +80,8 @@ extension View {
 struct PopoverView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// D28: drawn natural widths of the count and stale texts (closes the gap before "· N stale").
+    @State private var headerNaturals: [Double?] = [nil, nil]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -87,9 +89,11 @@ struct PopoverView: View {
             // text at its natural width (nothing truncates); the scan status text lives in the footer.
             let hf = headerFrames
             ZStack(alignment: .topLeading) {
-                HeaderText(text: hf.count, size: HeaderLayout.countSize, color: Theme.ink, frame: hf.frames[0].rect, alignment: .bottomLeading)
+                HeaderText(text: hf.count, size: HeaderLayout.countSize, color: Theme.ink, frame: hf.frames[0].rect, alignment: .bottomLeading,
+                           onNatural: { n in if headerNaturals[0] != n { headerNaturals[0] = n } })
                 if !hf.sub.isEmpty {
-                    HeaderText(text: hf.sub, size: HeaderLayout.subSize, color: Theme.ink2, frame: hf.frames[1].rect, alignment: .bottomLeading)
+                    HeaderText(text: hf.sub, size: HeaderLayout.subSize, color: Theme.ink2, frame: hf.frames[1].rect, alignment: .bottomLeading,
+                               onNatural: { n in if headerNaturals[1] != n { headerNaturals[1] = n } })
                 }
                 if let all = model.scanned?.repos, !all.isEmpty {
                     RepoFilterButton(repos: all, label: hf.filter, textFrame: hf.frames[2].rect)
@@ -248,7 +252,7 @@ struct PopoverView: View {
         let c = model.result.map(HeaderLayout.count) ?? "— worktrees", sub = model.result.map(HeaderLayout.sub) ?? ""
         let all = model.scanned?.repos ?? []
         let f = all.isEmpty ? "" : HeaderLayout.filterLabel(model.filter, repos: all)
-        return (c, sub, f, HeaderLayout.frames(count: c, sub: sub, filter: f))
+        return (c, sub, f, HeaderLayout.tightened(HeaderLayout.frames(count: c, sub: sub, filter: f), naturals: headerNaturals))
     }
 
     private var statusText: String { HeaderLayout.status(progress: model.progressLabel, cached: model.resultIsCached) }
@@ -547,10 +551,15 @@ struct CleanupResultsView: View {
             HStack {
                 Text("Freed \(Format.bytes(freed))").font(.system(size: 11.5, weight: .medium))
                 Spacer()
-                Button("Done") { model.cleanupResults = nil }.buttonStyle(HoverButtonStyle(kind: .link))
+                Button("Done") { model.cleanupResults = nil; model.clearReappeared() }.buttonStyle(HoverButtonStyle(kind: .link))
             }
             ForEach(Array(results.enumerated()), id: \.offset) { _, o in
                 Text(o.summary).font(.system(size: 10.5)).foregroundColor(Theme.ink2).lineLimit(1)
+            }
+            // D28: removed, but `git worktree list` still lists it: restored to the map.
+            ForEach(model.reappeared, id: \.self) { p in
+                Text("Still listed by git, restored: \(Format.middle(p, max: 48))").font(.system(size: 10.5, weight: .medium))
+                    .foregroundColor(Color(hex: LeafPalette.ink)).lineLimit(1).help(p)
             }
         }
         .padding(8)
@@ -664,13 +673,14 @@ struct RepoMenuPanel: View {
 struct HeaderText: View {
     let text: String, size: Double, color: Color, frame: Rect
     var alignment: Alignment = .leading
+    var onNatural: ((Double) -> Void)? = nil
     @State private var natural = 0.0
     var body: some View {
         Text(text).font(.system(size: size)).foregroundColor(color).lineLimit(1)
             .frame(width: frame.w, height: frame.h, alignment: alignment)
             .background(Text(text).font(.system(size: size)).fixedSize().hidden()
                 .background(GeometryReader { g in Color.clear.preference(key: NaturalWidthKey.self, value: g.size.width) }))
-            .onPreferenceChange(NaturalWidthKey.self) { natural = $0 }
+            .onPreferenceChange(NaturalWidthKey.self) { natural = $0; onNatural?($0) }
             .background(GeometryReader { g in
                 let f = g.frame(in: .named(PopoverCoords.name))
                 Color.clear.preference(key: HeaderMeasureKey.self,

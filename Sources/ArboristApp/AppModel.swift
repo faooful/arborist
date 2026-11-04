@@ -45,9 +45,22 @@ final class AppModel: ObservableObject {
     /// True in the `--hover-sweep` test hook: every cleanup entry point refuses to run (D15).
     let cleanupDisabled: Bool
 
-    /// Test hook (DEBUG only): one scan or the cache, no timers, no notifications, cleanup disabled.
-    init(sweepWith result: ScanResult) {
-        cleanupDisabled = true
+    /// D28: removed worktrees awaiting the confirming `git worktree list`, and ones that reappeared.
+    @Published private(set) var pendingRemovals: [PendingRemoval] = []
+    @Published private(set) var reappeared: [String] = []
+    /// D28: the removed leaves as they were drawn, fading out over 0.2 s above the re-laid-out map.
+    /// Drawing only: the model (map, counts, hit-testing) has already dropped them.
+    @Published private(set) var exitGhost: ExitGhost?
+    /// D28: the last confirming re-list finished (for the trial check).
+    @Published private(set) var removalsConfirmed = 0
+    /// False in hook modes: never write the user's scan cache.
+    private var writesCache = true
+
+    /// Test hook (DEBUG only): one scan or the cache, no timers, no notifications, cleanup disabled
+    /// (`allowCleanup` only for `--remove-trial`, which removes a throwaway worktree it created itself).
+    init(sweepWith result: ScanResult, allowCleanup: Bool = false) {
+        cleanupDisabled = !allowCleanup
+        writesCache = false
         self.scanned = result
         filter = .all
         freeBytes = result.volume?.freeBytes
@@ -158,18 +171,73 @@ final class AppModel: ObservableObject {
         precondition(!cleanupDisabled, "cleanup is disabled in this mode")
         guard !cleaning, !items.isEmpty else { return }
         cleaning = true
+        let logs = writesCache // hook modes never touch the user's cleanup log
         Task.detached(priority: .userInitiated) {
             var outcomes: [CleanupOutcome] = []
             for item in items { outcomes.append(Cleanup.execute(item)) }
-            CleanupLog.append(outcomes)
+            if logs { CleanupLog.append(outcomes) }
             let done = outcomes
             await MainActor.run {
                 self.cleanupResults = done
                 self.cleaning = false
+                self.applyRemovals(done)
                 self.refreshFree()
-                self.rescan()
             }
         }
+    }
+
+    /// D28: drop every succeeded item from the model at once (failed/skipped stay, their reasons in the
+    /// results), clear a hover/pin/selection on it, save the cache, then confirm with a background
+    /// `git worktree list` of only the affected repos.
+    func applyRemovals(_ outcomes: [CleanupOutcome]) {
+        guard let s = scanned else { return }
+        let paths = outcomes.filter(\.succeeded).map(\.item.path)
+        guard !paths.isEmpty else { return }
+        let (next, dropped) = OptimisticRemoval.apply(s, removed: paths)
+        let v = hover.visible
+        if [v.pinned, v.hovered, v.strip].contains(where: { OptimisticRemoval.clears($0, removed: dropped) }) { hover.reset() }
+        if OptimisticRemoval.clears(selection, removed: dropped) { selection = nil }
+        let animate = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion && !hover.instant
+        if animate, let old = leafMap {
+            let g = ExitGhost(map: old, ids: Set(old.leaves.map(\.item.id).filter { OptimisticRemoval.clears($0, removed: dropped) }),
+                              transform: hover.transform)
+            exitGhost = g
+            DispatchQueue.main.asyncAfter(deadline: .now() + ExitGhost.duration + 0.05) { [weak self] in
+                MainActor.assumeIsolated { if self?.exitGhost?.id == g.id { self?.exitGhost = nil } }
+            }
+        }
+        scanned = next
+        relayout()
+        pendingRemovals += dropped
+        saveCache(next)
+        let repos = OptimisticRemoval.repos(dropped)
+        Task.detached(priority: .utility) {
+            var listed: [String: [String]?] = [:]
+            for r in repos { listed[r] = OptimisticRemoval.list(r) }
+            let lists = listed
+            await MainActor.run { self.confirmRemovals(dropped, listed: lists) }
+        }
+    }
+
+    private func confirmRemovals(_ dropped: [PendingRemoval], listed: [String: [String]?]) {
+        let ids = Set(dropped.map(\.path))
+        pendingRemovals.removeAll { ids.contains($0.path) }
+        guard let s = scanned else { return }
+        let c = OptimisticRemoval.confirm(s, pending: dropped, listed: listed)
+        if !c.restored.isEmpty {
+            reappeared += c.restored
+            scanned = c.result
+            relayout()
+            saveCache(c.result)
+        }
+        removalsConfirmed += 1
+    }
+
+    func clearReappeared() { reappeared = [] }
+
+    private func saveCache(_ r: ScanResult) {
+        guard writesCache, !cleanupDisabled else { return }
+        Task.detached(priority: .utility) { try? ScanCache.save(r) }
     }
 
     func rescan() {
@@ -217,7 +285,7 @@ final class AppModel: ObservableObject {
                     self.checkLowSpace()
                     let toSave = r
                     // Hook mode (cleanup disabled) never writes the user's cache.
-                    if !self.cleanupDisabled { Task.detached(priority: .utility) { try? ScanCache.save(toSave) } }
+                    self.saveCache(toSave)
                 case .failed(let message):
                     self.scanError = message
                 }
@@ -284,4 +352,13 @@ final class AppModel: ObservableObject {
         NSPasteboard.general.setString(text, forType: .string)
     }
 }
+/// D28: removed leaves drawn where they were, fading out (cosmetic; never hit-testable).
+struct ExitGhost: Identifiable {
+    static let duration = 0.2
+    let id = UUID()
+    let map: LeafMap
+    let ids: Set<String>
+    let transform: MapTransform
+}
+
 #endif

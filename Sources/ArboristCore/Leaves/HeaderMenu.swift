@@ -38,6 +38,20 @@ public enum HeaderLayout {
                 ("filter", f, Rect(x: fx, y: 4, w: fw, h: 18)),
                 ("status", "", Rect(x: width - statusSide, y: 4, w: statusSide, h: statusSide))]
     }
+    /// D28: closes the gap the padded width estimate leaves after the count (and the stale text): with the
+    /// drawn natural widths known, the following frames move left so each starts `gap` after the text
+    /// before it. Frames only move left and keep their widths, so nothing can truncate; status stays put.
+    public static func tightened(_ frames: [(name: String, text: String, rect: Rect)], naturals: [Double?]) -> [(name: String, text: String, rect: Rect)] {
+        var out = frames, shift = 0.0
+        for i in frames.indices where i < 3 {
+            if i > 0 { out[i].rect.x -= shift }
+            if i < 2, i < naturals.count, let n = naturals[i], n > 0, n < frames[i].rect.w, !frames[i].text.isEmpty {
+                shift += frames[i].rect.w - n.rounded(.up)
+            }
+        }
+        return out
+    }
+
     /// The filter button's whole frame (text + chrome).
     public static func filterButton(_ frames: [(name: String, text: String, rect: Rect)]) -> Rect {
         let t = frames.first { $0.name == "filter" }!.rect
