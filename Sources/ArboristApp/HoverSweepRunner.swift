@@ -337,6 +337,73 @@ enum HoverSweepRunner {
         exit(failures == 0 ? 0 : 1)
     }
 
+    /// D29 `--motion-capture DIR`: PNG frames of the breeze (pointer moving, then stopped and settled) and of a
+    /// leaf blowing away (and the Reduce Motion fade), from the real PopoverView, for review on the Mac. The
+    /// spring runs on a manual clock so frames are repeatable. Cleanup disabled; no cache writes.
+    static func motionCapture(into dir: String) {
+        let limit = deadlineSeconds
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + limit) {
+            FileHandle.standardError.write(Data("motion-capture: timed out after \(Int(limit)) s\n".utf8))
+            exit(2)
+        }
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.prohibited)
+        let scan = ScanCache.load() ?? Scanner(config: ArboristConfig.load()).scan()
+        let model = AppModel(sweepWith: scan)
+        precondition(model.cleanupDisabled, "motion-capture must run with cleanup disabled")
+        guard let map = model.leafMap, let leaf = map.leaves.first(where: { !$0.item.id.isEmpty }) else { fail("no leaf map") }
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let hover = model.hover
+        let host = NSHostingView(rootView: PopoverView().environmentObject(model).environmentObject(hover))
+        host.frame.size = host.fittingSize
+        let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -10_000, y: -10_000), size: host.fittingSize),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host
+        window.orderFrontRegardless()
+        settle(host)
+        func log(_ s: String) { print("motion-capture: " + s) }
+        var failures = 0
+        func check(_ ok: Bool, _ what: String) { log((ok ? "ok   " : "FAIL ") + what); if !ok { failures += 1 } }
+        func shot(_ name: String) { settle(host); capture(host, marker: nil, to: dir + "/" + name + ".png"); log("wrote \(name).png") }
+
+        // Wind: sweep the pointer across the leaf's centre (view coordinates), 16 ms apart.
+        let t = hover.transform, c = t.toView(leaf.centroid)
+        check(!hover.windActive, "idle before the pointer moves (no timeline)")
+        var clock = 1000.0
+        for i in 0..<6 {
+            clock += 0.016
+            hover.wind.manualTime = clock
+            hover.pointer(view: CGPoint(x: c.x - 60 + Double(i) * 24, y: c.y), in: map, at: clock)
+            hover.wind.step(to: clock)
+            if i % 2 == 1 { shot(String(format: "wind-moving-%d", i / 2)) }
+        }
+        check(hover.windActive && !hover.wind.spring.settled, "breeze active while the pointer moves")
+        for (name, dt) in [("wind-stopped-0.1s", 0.1), ("wind-stopped-0.4s", 0.3)] {
+            clock += dt; hover.wind.manualTime = clock; hover.wind.step(to: clock); shot(name)
+        }
+        var n = 0
+        while !hover.wind.spring.settled && n < 600 { clock += 1.0 / 60; hover.wind.manualTime = clock; hover.wind.step(to: clock); n += 1 }
+        hover.windSettled()
+        shot("wind-settled")
+        check(hover.wind.spring.settled && !hover.windActive, "settled \(String(format: "%.2f", 0.5 + Double(n) / 60)) s after stopping; timeline off")
+        hover.wind.manualTime = nil
+
+        // Blow-away (and the Reduce Motion fade) of one leaf, at fixed progress.
+        for fade in [false, true] {
+            for p in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                var g = ExitGhost(map: map, ids: [leaf.item.id], transform: hover.transform, start: 0, fade: fade)
+                g.fixedProgress = p
+                model.setGhost(g)
+                shot(String(format: "%@-%03d", fade ? "fade" : "blow", Int(p * 100)))
+            }
+        }
+        model.setGhost(nil)
+        let end = BlowAway.frame(leaf.centroid, size: Pt(map.width, map.height), id: leaf.item.id, t: 1)
+        check(end.opacity == 0, "blow-away ends transparent past the edge (dx \(Int(end.dx)), dy \(Int(end.dy)))")
+        log("\(failures) failures")
+        exit(failures == 0 ? 0 : 1)
+    }
+
     /// `--action-check` (D22): runs Settings, Quit (dry run), Rescan and List through the real router and
     /// AppModel, and logs what fired. Settings logs whether a Settings window appeared and became key / front.
     /// Never quits; cleanup disabled; no menu bar item (the App scene isn't created, so Settings uses the

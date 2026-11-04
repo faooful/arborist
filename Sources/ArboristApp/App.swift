@@ -21,6 +21,9 @@ enum Entry {
             }
             HoverSweepRunner.removeTrial()
         }
+        if let dir = HoverSweepRunner.requestedValue(for: "--motion-capture") {
+            HoverSweepRunner.motionCapture(into: dir)
+        }
         if CommandLine.arguments.contains("--confirm-check") {
             guard ProcessInfo.processInfo.environment["ARBORIST_HOVER_SWEEP"] == "1" else {
                 FileHandle.standardError.write(Data("--confirm-check needs ARBORIST_HOVER_SWEEP=1\n".utf8))

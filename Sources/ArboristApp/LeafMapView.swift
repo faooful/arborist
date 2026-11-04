@@ -63,7 +63,7 @@ struct LeafMapView: View {
         let v = hover.visible
         let ringed = Set([v.hovered, v.pinned].compactMap { $0 })
         ZStack(alignment: .topLeading) {
-            LeafCanvas(map: map, only: nil)
+            WindLeaves(map: map, exclude: ringed)
                 .opacity(ringed.isEmpty ? 1 : LeafPalette.dimOthers)
             if !ringed.isEmpty {
                 LeafCanvas(map: map, only: ringed).allowsHitTesting(false)
@@ -79,20 +79,45 @@ struct LeafMapView: View {
     }
 }
 
-/// D28: a 0.2 s exit for removed leaves: fade and shrink slightly, drawn with the transform they had.
+/// D29: removed leaves blow away toward the nearest edge (lift, tumble, drift, fade; 0.7 s), drawn with the
+/// transform they had. Reduce Motion: a plain 0.2 s fade. Drawing only; the timeline runs only while shown.
 struct ExitGhostView: View {
     let ghost: ExitGhost
-    @State private var gone = false
     var body: some View {
-        LeafCanvas(map: ghost.map, only: ghost.ids)
-            .scaleEffect(gone ? 0.92 : 1)
-            .opacity(gone ? 0 : 1)
-            .frame(width: ghost.map.width, height: ghost.map.height, alignment: .topLeading)
-            .scaleEffect(ghost.transform.scale, anchor: .topLeading)
-            .offset(x: ghost.transform.dx, y: ghost.transform.dy)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-            .onAppear { withAnimation(.easeOut(duration: ExitGhost.duration)) { gone = true } }
+        TimelineView(.animation(minimumInterval: nil, paused: ghost.fixedProgress != nil)) { tl in
+            let t = ghost.fixedProgress ?? min(1, (tl.date.timeIntervalSinceReferenceDate - ghost.start) / ghost.duration)
+            let size = Pt(ghost.map.width, ghost.map.height)
+            LeafCanvas(map: ghost.map, only: ghost.ids, motion: { leaf in
+                if ghost.fade { return LeafMotion(opacity: 1 - t) }
+                let f = BlowAway.frame(leaf.centroid, size: size, id: leaf.item.id, t: t)
+                return LeafMotion(angle: f.angle, dx: f.dx, dy: f.dy, scale: f.scale, opacity: f.opacity)
+            })
+        }
+        .frame(width: ghost.map.width, height: ghost.map.height, alignment: .topLeading)
+        .scaleEffect(ghost.transform.scale, anchor: .topLeading)
+        .offset(x: ghost.transform.dx, y: ghost.transform.dy)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+/// D29: the leaves, swaying in the breeze while the spring is unsettled. The TimelineView exists only while
+/// `windActive` and pauses itself once settled, so an idle map runs no timer. Hovered/pinned leaves are held still.
+struct WindLeaves: View {
+    @EnvironmentObject var hover: HoverModel
+    let map: LeafMap
+    let exclude: Set<String>
+    var body: some View {
+        if hover.windActive {
+            TimelineView(.animation(minimumInterval: nil, paused: !hover.windActive)) { tl in
+                let settled = hover.wind.step(to: tl.date.timeIntervalSinceReferenceDate)
+                LeafCanvas(map: map, only: nil, motion: hover.wind.motion(exclude: exclude))
+                    .onChange(of: settled) { s in if s { hover.windSettled() } }
+                    .onAppear { if settled { DispatchQueue.main.async { hover.windSettled() } } }
+            }
+        } else {
+            LeafCanvas(map: map, only: nil)
+        }
     }
 }
 
@@ -122,10 +147,25 @@ struct LeafRings: View {
 struct LeafCanvas: View {
     let map: LeafMap
     let only: Set<String>?
+    /// D29: an optional drawing-only motion per leaf (sway or blow-away), about its centroid.
+    var motion: ((Leaf) -> LeafMotion?)? = nil
 
     var body: some View {
         Canvas { ctx, _ in
-            for leaf in map.leaves where only == nil || only!.contains(leaf.item.id) { draw(leaf, in: &ctx) }
+            for leaf in map.leaves where only == nil || only!.contains(leaf.item.id) {
+                if let m = motion?(leaf) {
+                    var c = ctx
+                    let o = leaf.centroid
+                    c.opacity = m.opacity
+                    c.translateBy(x: o.x + m.dx, y: o.y + m.dy)
+                    c.rotate(by: .degrees(m.angle))
+                    c.scaleBy(x: m.scale, y: m.scale)
+                    c.translateBy(x: -o.x, y: -o.y)
+                    draw(leaf, in: &c)
+                } else {
+                    draw(leaf, in: &ctx)
+                }
+            }
         }
         .frame(width: map.width, height: map.height)
     }

@@ -197,14 +197,13 @@ final class AppModel: ObservableObject {
         let v = hover.visible
         if [v.pinned, v.hovered, v.strip].contains(where: { OptimisticRemoval.clears($0, removed: dropped) }) { hover.reset() }
         if OptimisticRemoval.clears(selection, removed: dropped) { selection = nil }
-        let animate = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion && !hover.instant
-        if animate, let old = leafMap {
+        // D29: the removed leaves blow away (0.7 s; a plain 0.2 s fade with Reduce Motion). Drawing only:
+        // the model, map and hit layer drop them right now.
+        if !hover.instant, let old = leafMap {
+            let fade = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
             let g = ExitGhost(map: old, ids: Set(old.leaves.map(\.item.id).filter { OptimisticRemoval.clears($0, removed: dropped) }),
-                              transform: hover.transform)
-            exitGhost = g
-            DispatchQueue.main.asyncAfter(deadline: .now() + ExitGhost.duration + 0.05) { [weak self] in
-                MainActor.assumeIsolated { if self?.exitGhost?.id == g.id { self?.exitGhost = nil } }
-            }
+                              transform: hover.transform, start: HoverModel.now(), fade: fade)
+            showGhost(g)
         }
         scanned = next
         relayout()
@@ -234,6 +233,17 @@ final class AppModel: ObservableObject {
     }
 
     func clearReappeared() { reappeared = [] }
+
+    /// D29 DEBUG capture: pin the ghost at a progress (nil = clear it).
+    func setGhost(_ g: ExitGhost?) { exitGhost = g }
+
+    /// D29: shows an exit ghost and drops it once its animation is done.
+    func showGhost(_ g: ExitGhost) {
+        exitGhost = g
+        DispatchQueue.main.asyncAfter(deadline: .now() + g.duration + 0.05) { [weak self] in
+            MainActor.assumeIsolated { if self?.exitGhost?.id == g.id, self?.exitGhost?.fixedProgress == nil { self?.exitGhost = nil } }
+        }
+    }
 
     private func saveCache(_ r: ScanResult) {
         guard writesCache, !cleanupDisabled else { return }
@@ -354,11 +364,16 @@ final class AppModel: ObservableObject {
 }
 /// D28: removed leaves drawn where they were, fading out (cosmetic; never hit-testable).
 struct ExitGhost: Identifiable {
-    static let duration = 0.2
     let id = UUID()
     let map: LeafMap
     let ids: Set<String>
     let transform: MapTransform
+    /// Wall-clock start (HoverModel.now()) and Reduce Motion (plain fade).
+    let start: Double
+    let fade: Bool
+    /// DEBUG capture: draw at this progress (0…1) instead of the clock.
+    var fixedProgress: Double? = nil
+    var duration: Double { fade ? BlowAway.fadeDuration : BlowAway.duration }
 }
 
 #endif
