@@ -103,12 +103,14 @@ public enum GitParsing {
 
     /// Stale rule: merged into the default branch (and has its own commits), upstream gone, or git says prunable.
     public static func staleReasons(branch: String?, defaultBranch: String?, isMain: Bool,
-                                    mergedIntoDefault: Bool, upstreamGone: Bool, prunable: Bool) -> [StaleReason] {
+                                    mergedIntoDefault: Bool, upstreamGone: Bool, prunable: Bool,
+                                    squashMerged: Bool = false) -> [StaleReason] {
         var r: [StaleReason] = []
         if prunable { r.append(.prunable) }
         guard !isMain, let branch else { return r }
         if branch != defaultBranch && mergedIntoDefault { r.append(.merged) }
         if upstreamGone { r.append(.upstreamGone) }
+        if branch != defaultBranch && !mergedIntoDefault && squashMerged { r.append(.squashMerged) }
         return r
     }
 }

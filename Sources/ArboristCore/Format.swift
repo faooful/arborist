@@ -30,7 +30,7 @@ public enum Format {
                 var flags: [String] = []
                 if w.dirty { flags.append("dirty") }
                 if let n = w.unpushedCommits, n > 0 { flags.append("\(n) unpushed") }
-                if w.stale { flags.append("stale: " + w.staleReasons.map(\.rawValue).joined(separator: ",")) }
+                if w.stale { flags.append("stale: " + w.staleReasons.map(\.rawValue).joined(separator: ",") + (w.mergeNote.map { " (\($0))" } ?? "")) }
                 let br = w.branch ?? "(detached)"
                 out.append("  \(pad(bytes(w.size.total), 9))  \(br)\(w.isMain ? " [main]" : "")  \(flags.joined(separator: " · "))  \(w.path)")
             }

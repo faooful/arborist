@@ -3,7 +3,11 @@ import Foundation
 /// Read-only scanner. Never deletes, moves, or writes anything inside scanned folders.
 public final class Scanner: Sendable {
     public let config: ArboristConfig
-    public init(config: ArboristConfig = .load()) { self.config = config }
+    /// D31: merged-PR lookup for squash/rebase merges; `GHPullRequests.shared` uses `gh` when present.
+    public let prLookup: PRLookup?
+    public init(config: ArboristConfig = .load(), prLookup: PRLookup? = GHPullRequests.shared) {
+        self.config = config; self.prLookup = prLookup
+    }
 
     /// Folders under the home folder that we never walk into unless they are a chosen root:
     /// they are huge, rarely hold repos, or trigger macOS privacy prompts.
@@ -163,6 +167,8 @@ public final class Scanner: Sendable {
         var merged: Set<String> = []
         var tips: [String: String] = [:]
         var defaultTip: String?
+        /// The ref compared against: `origin/<default>` when it exists, else the local default branch (no fetch).
+        var target: String?
     }
 
     func repoGit(_ repo: String) -> RepoGit {
@@ -170,6 +176,7 @@ public final class Scanner: Sendable {
         guard let d = g.defaultBranch else { return g }
         let target = Shell.git(repo, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/\(d)") != nil ? "origin/\(d)" : d
         g.defaultTip = Shell.git(repo, "rev-parse", "--verify", "--quiet", target)
+        g.target = g.defaultTip == nil ? nil : target
         for line in (Shell.git(repo, "for-each-ref", "--format=%(refname:short)\u{1f}%(objectname)", "refs/heads") ?? "").split(separator: "\n") {
             let parts = line.split(separator: "\u{1f}", maxSplits: 1).map(String.init)
             if parts.count == 2 { g.tips[parts[0]] = parts[1] }
@@ -220,8 +227,16 @@ public final class Scanner: Sendable {
                 .split(separator: "\n").count > 1
             merged = moved
         }
+        // D31: squash/rebase merges. Only for a clean worktree that isn't ahead (nothing else could make it ready).
+        var squash: String?
+        if !merged, !isMain, st.files == 0, (st.ahead ?? 0) == 0, let b = w.branch, let d = git.defaultBranch, b != d,
+           let tip = git.tips[b], let target = git.target {
+            squash = SquashMerge.detect(repo: repoPath, branch: b, tip: tip, target: target, prs: prLookup)
+        }
+        w.mergeNote = squash
         w.staleReasons = GitParsing.staleReasons(branch: w.branch, defaultBranch: git.defaultBranch, isMain: isMain,
-                                                 mergedIntoDefault: merged, upstreamGone: st.upstreamGone, prunable: false)
+                                                 mergedIntoDefault: merged, upstreamGone: st.upstreamGone, prunable: false,
+                                                 squashMerged: squash != nil)
         w.stale = !w.staleReasons.isEmpty
         w.size = DiskUsage.measureWorktree(p.path, skipped: &skipped, cancel: cancel)
         return w

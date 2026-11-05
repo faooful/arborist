@@ -592,7 +592,7 @@ struct CleanupResultsView: View {
 
 extension StaleReason {
     var label: String {
-        switch self { case .merged: "merged"; case .upstreamGone: "upstream gone"; case .prunable: "folder missing" }
+        switch self { case .merged: "merged"; case .upstreamGone: "upstream gone"; case .prunable: "folder missing"; case .squashMerged: "squash-merged" }
     }
 }
 

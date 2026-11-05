@@ -27,6 +27,7 @@ public enum StaleReason: String, Codable, Sendable {
     case merged      // branch fully merged into the default branch
     case upstreamGone // upstream branch was deleted
     case prunable    // git reports the worktree directory is missing
+    case squashMerged // D31: squash- or rebase-merged (merged PR on GitHub, or every commit's patch is in the default branch)
 }
 
 public struct Worktree: Codable, Equatable, Sendable {
@@ -55,12 +56,14 @@ public struct Worktree: Codable, Equatable, Sendable {
     public var uncommittedFiles: Int?
     /// `git worktree lock` was used on it (D14). nil in older scans.
     public var locked: Bool?
+    /// D31: how a squash/rebase merge was detected, e.g. "PR #12 merged" or "squash-merged". nil otherwise.
+    public var mergeNote: String?
 
     /// One word for the worktree's state, most urgent first (D12).
     public var status: WorktreeStatus {
         if dirty { return .uncommitted }
         if (unpushedCommits ?? 0) > 0 { return .unpushed }
-        if staleReasons.contains(.merged) { return .merged }
+        if staleReasons.contains(.merged) || staleReasons.contains(.squashMerged) { return .merged }
         if stale { return .stale }
         return .clean
     }

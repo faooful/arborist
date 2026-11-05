@@ -23,7 +23,8 @@ public enum CleanupBlocker: Equatable, Sendable {
 /// predicate. Pure: it reads the scan, never the disk. A worktree is clearable only if all of these hold:
 /// - it's not the main checkout and not locked
 /// - it has no uncommitted files and no unpushed commits
-/// - its branch is merged into the default branch, its upstream is gone, or its folder is missing (prune only)
+/// - its branch is merged into the default branch, its upstream is gone, its folder is missing (prune only),
+///   or (D31) it was squash- or rebase-merged (`SquashMerge`)
 public enum CleanupSafety {
     public static func blocker(_ w: Worktree) -> CleanupBlocker? {
         if w.isMain { return .mainCheckout }
@@ -31,7 +32,8 @@ public enum CleanupSafety {
         if w.staleReasons.contains(.prunable) { return nil }
         if w.dirty { return .uncommitted(max(w.uncommittedFiles ?? 1, 1)) }
         if (w.unpushedCommits ?? 0) > 0 || (w.ahead ?? 0) > 0 { return .unpushed }
-        if !(w.staleReasons.contains(.merged) || w.staleReasons.contains(.upstreamGone)) { return .notStale }
+        if !(w.staleReasons.contains(.merged) || w.staleReasons.contains(.upstreamGone)
+             || w.staleReasons.contains(.squashMerged)) { return .notStale }
         return nil
     }
 
