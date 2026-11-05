@@ -159,3 +159,25 @@ public struct RepoMenuRow: Equatable, Sendable {
         repos.map { RepoMenuRow(name: $0.name, count: $0.worktrees.count, selected: filter.includes($0)) }
     }
 }
+
+/// D34: the Refresh icon spins only while a scan runs (never under Reduce Motion), one turn per `period`.
+public enum RefreshSpin {
+    public static let period = 1.0
+    public static func isSpinning(scanning: Bool, reduceMotion: Bool) -> Bool { scanning && !reduceMotion }
+    public static func angle(at t: Date, start: Date) -> Double {
+        let e = max(0, t.timeIntervalSince(start))
+        return (e.truncatingRemainder(dividingBy: period) / period) * 360
+    }
+}
+
+/// D34: footer icons (Settings, Quit) share one fixed, centred box and glyph size.
+public enum FooterIconLayout {
+    public static let box = 22.0, glyph = 14.0
+    /// Centre Y values may differ by at most this much.
+    public static let maxCentreDelta = 0.5
+    public static func aligned(_ rects: [Rect]) -> Bool {
+        let ys = rects.map { $0.y + $0.h / 2 }
+        guard let lo = ys.min(), let hi = ys.max() else { return false }
+        return hi - lo <= maxCentreDelta
+    }
+}

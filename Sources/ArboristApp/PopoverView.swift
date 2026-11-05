@@ -170,12 +170,12 @@ struct PopoverView: View {
                 // D26: the scan status text, moved here from the header (where it truncated).
                 Text(statusText).font(.system(size: 10.5)).foregroundColor(Theme.ink2).lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .trailing).padding(.trailing, 4)
-                Button { model.router.perform(.settings) } label: { Image(systemName: "gearshape").font(.system(size: 13)) }
+                Button { model.router.perform(.settings) } label: { FooterIcon(name: "gearshape") }
                     .buttonStyle(HoverButtonStyle(kind: .icon))
                     .help("Settings")
                     .accessibilityLabel("Settings")
                     .reportFrame(FooterFramesKey.self)
-                Button { model.router.perform(.quit) } label: { Image(systemName: "power").font(.system(size: 13)) }
+                Button { model.router.perform(.quit) } label: { FooterIcon(name: "power") }
                     .buttonStyle(HoverButtonStyle(kind: .icon))
                     .help("Quit Arborist")
                     .accessibilityLabel("Quit Arborist")
@@ -185,6 +185,7 @@ struct PopoverView: View {
             .foregroundColor(Theme.ink2)
             .frame(width: PopoverLayout.mapWidth, height: PopoverLayout.footerRowHeight)
             .onPreferenceChange(FooterFramesKey.self) { model.hover.drawnFooterButtons = $0.isEmpty ? nil : $0 }
+            .onPreferenceChange(FooterIconKey.self) { f in model.hover.drawnFooterIcons = f.map { ($0.name, $0.rect) } }
             if model.showList, let r = model.result { Checklist(result: r).frame(maxHeight: 260) }
             if let results = model.cleanupResults { CleanupResultsView(results: results) }
         }
@@ -595,21 +596,46 @@ extension StaleReason {
     }
 }
 
+/// D34: a footer icon. Symbols drawn as text sit on their own baseline metrics ("power" rode lower than
+/// "gearshape"), so each is a resizable image in the same fixed, centred box.
+struct FooterIcon: View {
+    @EnvironmentObject var model: AppModel
+    let name: String
+    var body: some View {
+        Image(systemName: name).resizable().scaledToFit()
+            .frame(width: FooterIconLayout.glyph, height: FooterIconLayout.glyph)
+            .frame(width: FooterIconLayout.box, height: FooterIconLayout.box, alignment: .center)
+            .background(GeometryReader { g in
+                let f = g.frame(in: .named(PopoverCoords.name))
+                Color.clear.preference(key: FooterIconKey.self, value: [NamedRect(name: name, rect: Rect(x: f.minX, y: f.minY, w: f.width, h: f.height))])
+            })
+    }
+}
+struct FooterIconKey: PreferenceKey {
+    static let defaultValue: [NamedRect] = []
+    static func reduce(value: inout [NamedRect], nextValue: () -> [NamedRect]) { value += nextValue() }
+}
+
 /// D33: the header's Refresh button (top right).
 struct RefreshButton: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let help: String
-    @State private var spin = false
+    /// D34: when the current spin started; nil = not spinning.
+    @State private var spinStart: Date?
 
     var body: some View {
+        let spinning = RefreshSpin.isSpinning(scanning: model.scanning, reduceMotion: reduceMotion)
         Button { model.requestRescan() } label: {
-            Image(systemName: model.rescanQueued ? "arrow.clockwise.circle.fill" : "arrow.clockwise")
-                .font(.system(size: 12, weight: .medium))
-                .rotationEffect(.degrees(model.scanning && spin && !reduceMotion ? 360 : 0))
-                .animation(model.scanning && !reduceMotion ? .linear(duration: 1).repeatForever(autoreverses: false) : .default, value: spin)
-                .frame(width: HeaderLayout.statusSide, height: HeaderLayout.statusSide)
-                .contentShape(Rectangle())
+            // D34: the angle is computed from the clock while scanning (TimelineView paused otherwise), not a
+            // repeatForever animation, which SwiftUI kept running after `scanning` went false.
+            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !spinning)) { ctx in
+                Image(systemName: model.rescanQueued ? "arrow.clockwise.circle.fill" : "arrow.clockwise")
+                    .font(.system(size: 12, weight: .medium))
+                    .rotationEffect(.degrees(spinning ? RefreshSpin.angle(at: ctx.date, start: spinStart ?? ctx.date) : 0))
+            }
+            .frame(width: HeaderLayout.statusSide, height: HeaderLayout.statusSide)
+            .contentShape(Rectangle())
         }
         .buttonStyle(HoverButtonStyle(kind: .icon, height: HeaderLayout.statusSide))
         .frame(width: HeaderLayout.statusSide, height: HeaderLayout.statusSide)
@@ -620,8 +646,8 @@ struct RefreshButton: View {
             Color.clear.onAppear { model.hover.drawnRefresh = Rect(x: f.minX, y: f.minY, w: f.width, h: f.height) }
                 .onChange(of: f) { f in model.hover.drawnRefresh = Rect(x: f.minX, y: f.minY, w: f.width, h: f.height) }
         })
-        .onAppear { spin = model.scanning }
-        .onChange(of: model.scanning) { s in spin = s }
+        .onAppear { spinStart = spinning ? Date() : nil; model.hover.refreshSpinning = spinning }
+        .onChange(of: spinning) { s in spinStart = s ? Date() : nil; model.hover.refreshSpinning = s }
     }
 }
 

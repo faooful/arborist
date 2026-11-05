@@ -468,6 +468,11 @@ enum HoverSweepRunner {
         } else {
             log("refresh: not drawn")
         }
+        // D34: footer icons share a centre line; the refresh icon spins during the scan.
+        let icons = model.hover.drawnFooterIcons
+        log("footer icons: " + icons.map { "\($0.name) \($0.rect) cy=\($0.rect.y + $0.rect.h / 2)" }.joined(separator: ", "))
+        log("footer icons verdict: " + (icons.count == 2 && FooterIconLayout.aligned(icons.map(\.rect)) ? "OK" : "FAIL"))
+        log("refresh spinning during scan: \(model.hover.refreshSpinning) (scanning=\(model.scanning))")
         let click = model.requestRescan()
         log("refresh: click while scanning=\(model.scanning) → \(click), queued=\(model.rescanQueued)")
         log("refresh verdict: " + (refreshOK && (click == .rescan || model.rescanQueued) ? "OK" : "FAIL"))
@@ -506,7 +511,12 @@ enum HoverSweepRunner {
         // Let the rescan finish (or time out) so its progress is logged too; it never writes the cache here.
         let scanUntil = Date().addingTimeInterval(40)
         while model.scanning && Date() < scanUntil { RunLoop.current.run(until: Date().addingTimeInterval(0.1)) }
-        log("rescan finished=\(!model.scanning), repos=\(model.scanned?.repos.count ?? 0), cached=\(model.resultIsCached)")
+        // The queued rescan (D33) runs once; wait for it too, then 1 s, and the icon must be still.
+        while model.scanning && Date() < scanUntil.addingTimeInterval(40) { RunLoop.current.run(until: Date().addingTimeInterval(0.1)) }
+        log("rescan finished=\(!model.scanning), repos=\(model.scanned?.repos.count ?? 0), cached=\(model.resultIsCached), queued=\(model.rescanQueued)")
+        RunLoop.current.run(until: Date().addingTimeInterval(1))
+        log("refresh spinning 1 s after: \(model.hover.refreshSpinning), scanning=\(model.scanning)")
+        log("spin verdict: " + (!model.hover.refreshSpinning && !model.scanning ? "OK (stopped)" : "FAIL (still spinning)"))
         precondition(model.pendingCleanup == nil && model.cleanupResults == nil && !model.cleaning, "cleanup must not run")
         bridgeWindow.orderOut(nil)
         log(done ? "done" : "done (settings unverified)")
