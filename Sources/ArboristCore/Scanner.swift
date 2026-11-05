@@ -150,10 +150,19 @@ public final class Scanner: Sendable {
                 if name.hasPrefix(".") || DiskUsage.isRebuildable(name) || Self.skipAnywhere.contains(name) { continue }
                 let child = dir == "/" ? "/" + name : dir + "/" + name
                 if dir == home && Self.skipUnderHome.contains(name) && !rootSet.contains(child) { continue }
+                // D32: the Go module cache (…/go/pkg/mod) is huge, read-only and never holds repos.
+                if name == "mod" && dir.hasSuffix("/go/pkg") { continue }
                 walk(child, depth: depth + 1)
             }
         }
-        for r in resolved { walk(r, depth: 0) }
+        // D32: nested roots (~/go under ~) are walked first, from depth 0, so their full depth is covered; the
+        // outer walk then meets them as visited and skips them. Repos are also deduped by main path in `scan`.
+        let walkOrder = resolved.enumerated().sorted { a, b in
+            let nested = { (x: String, y: String) in x.hasPrefix(y == "/" ? "/" : y + "/") }
+            if nested(a.element, b.element) != nested(b.element, a.element) { return nested(a.element, b.element) }
+            return a.offset < b.offset
+        }.map(\.element)
+        for r in walkOrder { walk(r, depth: 0) }
         return found
     }
 
