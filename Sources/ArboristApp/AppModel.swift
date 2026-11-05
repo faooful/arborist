@@ -22,6 +22,8 @@ final class AppModel: ObservableObject {
     /// True when there are repos but the filter hides all of them.
     var filterHidesEverything: Bool { scanned.map { filter.isEmpty($0.repos) } ?? false }
     @Published var scanning = false
+    /// D33: a Refresh click during a scan; runs one rescan when the current scan ends.
+    @Published var rescanQueued = false
     /// D26: the repo filter menu, an in-popover panel (not a system popover).
     @Published var repoMenuOpen = false
     /// Repos measured so far in the running scan, and how many there are (nil until discovered).
@@ -250,6 +252,18 @@ final class AppModel: ObservableObject {
         Task.detached(priority: .utility) { try? ScanCache.save(r) }
     }
 
+    /// D33: the header Refresh button. Rescans now, or queues one rescan if a scan is running.
+    @discardableResult
+    func requestRescan() -> HeaderLayout.RefreshClick {
+        let c = HeaderLayout.refreshClick(scanning: scanning, queued: rescanQueued)
+        switch c {
+        case .rescan: router.perform(.rescan)
+        case .queue: rescanQueued = true
+        case .alreadyQueued: break
+        }
+        return c
+    }
+
     func rescan() {
         guard !scanning else { return }
         scanning = true
@@ -300,7 +314,10 @@ final class AppModel: ObservableObject {
                     self.scanError = message
                 }
             }
-            if id == self.scanID { self.scanning = false; self.progress = nil }
+            if id == self.scanID {
+                self.scanning = false; self.progress = nil
+                if self.rescanQueued { self.rescanQueued = false; self.rescan() } // D33
+            }
         }
     }
 
