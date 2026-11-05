@@ -221,3 +221,11 @@ Requested as "D27" by Cedric; D27/D27b and D28 were already taken, so it is logg
 - **Capture:** DEBUG `--motion-capture DIR` (ARBORIST_HOVER_SWEEP=1, cleanup disabled, manual spring clock) and
   `scripts/motion-capture.sh` write wind-moving/stopped/settled and blow-/fade- frames.
 - Math in `ArboristCore/Leaves/Wind.swift` (`Spring2D`, `Wind`, `BlowAway`). macOS UI unverified on Linux.
+
+## D31: Squash- and rebase-merged branches are Clear-ready (2026-11-04)
+
+GitHub squash and rebase merges leave the branch tip outside `origin/<default>`'s ancestry, so `for-each-ref --merged` never matched them and they stayed "Not merged" unless the remote branch was deleted *and* pruned locally. New `StaleReason.squashMerged` (`SquashMerge.detect`), tried only for a clean, not-ahead, non-default branch with its own commits that isn't already ancestry-merged:
+1. If `gh` is installed and authed (`gh auth status`, checked once): `gh pr list --state merged --head <branch> --json headRefOid,mergedAt,number`, 4 s timeout, cached per repo+branch for the process. Counts only if a merged PR's `headRefOid` equals the local tip or the tip is an ancestor of it. Note: "PR #N merged". gh missing/unauthed/failing → local rules.
+2. Offline: `git cherry <target> <tip>` shows only `-` (rebase merges), or the tip's tree equals a tree in the last 200 target commits, or the branch's combined diff since the merge base has the same `patch-id --stable` as one of those commits (squash merges). Note: "squash-merged".
+`<target>` is `origin/<default>` when that ref exists, else the local default branch. Arborist never runs `git fetch`: results are as fresh as the user's last fetch. The CLI stays read-only (gh only lists). `CleanupSafety.blocker` accepts `.squashMerged` alongside merged / upstream gone / prunable; main, locked, dirty and ahead still block. `Cleanup.execute` still re-checks right before removing (same head, clean, not ahead); branches are never deleted. Shown in `scan` output ("stale: squashMerged (PR #12 merged)"), in JSON (`staleReasons`, `mergeNote`) and on the card's sync line.
+

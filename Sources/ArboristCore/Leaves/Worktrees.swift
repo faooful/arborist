@@ -85,6 +85,7 @@ public struct HoverCard: Equatable, Sendable {
         changes = Format.files(n)
         sync = Format.sync(ahead: w.ahead, behind: w.behind, hasUpstream: w.upstream != nil,
                            gone: w.staleReasons.contains(.upstreamGone))
+            + (w.mergeNote.map { " · \($0)" } ?? "") // D31: "PR #12 merged" / "squash-merged"
         lastCommit = w.lastCommitDate.map { Format.age($0, now: now) } ?? "No commits"
         message = Format.wrap(w.lastCommitSubject ?? "", width: Self.messageChars, maxLines: 2)
         removeCommand = w.isMain ? nil : w.removeCommand
