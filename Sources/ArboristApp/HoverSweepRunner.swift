@@ -318,7 +318,14 @@ enum HoverSweepRunner {
         func hasLeaf() -> Bool { model.leafMap?.leaves.contains { URL(fileURLWithPath: $0.item.id).resolvingSymlinksInPath().path == URL(fileURLWithPath: t.worktree).resolvingSymlinksInPath().path } ?? false }
         check(hasLeaf(), "trial leaf on the map before removal")
         let count0 = model.result?.worktreeCount ?? 0, ready0 = model.clearPlan.count
-        guard let ref = WorktreeList.find(scan, path: t.worktree), let item = Cleanup.item(ref) else { fail("trial worktree not ready to clean") }
+        guard let ref = WorktreeList.find(scan, path: t.worktree) else {
+            let listed = scan.repos.flatMap(\.worktrees).map(\.path).joined(separator: ", ")
+            fail("trial worktree \(t.worktree) not in the scan (git listed: \(listed))")
+        }
+        guard let item = Cleanup.item(ref) else {
+            let w = ref.worktree
+            fail("trial worktree not ready to clean: blocker \(String(describing: Cleanup.blocker(w))), status \(w.status), stale reasons \(w.staleReasons), branch \(w.branch ?? "detached"), path \(w.path)")
+        }
         model.confirmCleanup([item])
         let end = Date().addingTimeInterval(20)
         while model.cleanupResults == nil && Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
