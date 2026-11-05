@@ -12,7 +12,7 @@ USAGE:
   arborist render [--sample|--busy|--from SCAN.json] [--filter NAME[,NAME]] [--state S[,..]] --hover-sweep DIR   hover sweep: frame-NNN.svg + frames.json
   arborist render-stages --out FILE.svg        the four menu bar leaf stages as SVG
 
-Without --root, roots come from ~/.config/arborist/config.json (default: ~ and ~/Documents).
+Without --root, roots and depth come from ~/.config/arborist/config.json (\(ArboristConfig.defaultsSummary)).
 arborist never deletes anything.
 """
 
