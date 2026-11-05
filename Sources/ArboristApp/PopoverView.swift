@@ -137,7 +137,7 @@ struct PopoverView: View {
             .overlay(alignment: .top) {
                 if let err = model.scanError {
                     HStack(spacing: 8) {
-                        Text(err + (model.result != nil ? " Showing the last results." : ""))
+                        Text(err + (model.result != nil && model.staleCacheRepos.isEmpty ? " Showing the last results." : ""))
                             .font(.system(size: 11)).foregroundColor(Theme.ink)
                         Spacer()
                         Button("Retry") { model.router.perform(.rescan) }.buttonStyle(HoverButtonStyle(kind: .link))

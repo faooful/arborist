@@ -88,8 +88,8 @@ final class ScanProgressTests: XCTestCase, @unchecked Sendable {
         catch { XCTAssertTrue(error is Boom) }
     }
 
-    func testScanTimeoutConfigDefaultsTo180() throws {
-        XCTAssertEqual(ArboristConfig.defaults.scanTimeoutSeconds, 180)
+    func testScanTimeoutConfigDefaultsTo600() throws {
+        XCTAssertEqual(ArboristConfig.defaults.scanTimeoutSeconds, 600)
         let c = try JSONDecoder().decode(ArboristConfig.self, from: Data(#"{"scanTimeoutSeconds": 30}"#.utf8))
         XCTAssertEqual(c.scanTimeoutSeconds, 30)
         XCTAssertEqual(c.maxDepth, ArboristConfig.defaults.maxDepth)

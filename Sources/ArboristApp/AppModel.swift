@@ -32,6 +32,13 @@ final class AppModel: ObservableObject {
     @Published private(set) var resultIsCached = false
     /// Last scan failure (timeout); cleared when a scan starts.
     @Published private(set) var scanError: String?
+    /// D34: after a timeout, repos still shown from the cache because this scan didn't reach them.
+    @Published private(set) var staleCacheRepos: Set<String> = []
+    /// D34: duration of the last scan that finished (timed-out scans don't count); sets the adaptive timeout.
+    private var lastFullScanDuration: TimeInterval? {
+        get { let v = UserDefaults.standard.double(forKey: "lastFullScanSeconds"); return v > 0 ? v : nil }
+        set { UserDefaults.standard.set(newValue ?? 0, forKey: "lastFullScanSeconds") }
+    }
     @Published var freeBytes: Int64?
     @Published var config = ArboristConfig.load()
     @Published var selection: String?   // path of the selected repo/worktree/cache
@@ -268,6 +275,7 @@ final class AppModel: ObservableObject {
         guard !scanning else { return }
         scanning = true
         scanError = nil
+        staleCacheRepos = []
         progress = (0, nil)
         scanID += 1
         let id = scanID
@@ -276,7 +284,9 @@ final class AppModel: ObservableObject {
         var partial: [Repo] = []
         Task {
             // Events arrive here on the main actor, in order; a newer scan makes older events no-ops.
-            let stream = Scanner(config: cfg).events(timeout: cfg.scanTimeoutSeconds)
+            let started = Date()
+            let timeout = ScanTimeout.effective(configured: cfg.scanTimeoutSeconds, lastFullDuration: self.lastFullScanDuration)
+            let stream = Scanner(config: cfg).events(timeout: timeout)
             for await event in stream {
                 guard id == self.scanID else { return }
                 switch event {
@@ -288,13 +298,9 @@ final class AppModel: ObservableObject {
                     partial.append(repo)
                     self.progress = (done, total)
                     // Fresh repos replace their cached versions; the rest of the last scan stays
-                    // on screen until this one finishes, so the map fills in rather than resetting.
-                    let fresh = Set(partial.map(\.path))
-                    let kept = (previous?.repos ?? []).filter { !fresh.contains($0.path) }
-                    var r = ScanResult(scannedAt: previous?.scannedAt ?? Date(), roots: cfg.expandedRoots,
-                                       volume: previous?.volume ?? DiskUsage.volume(for: ArboristConfig.home),
-                                       repos: (partial + kept).sorted { $0.size.total > $1.size.total },
-                                       caches: previous?.caches ?? [], skippedPaths: 0)
+                    // on screen until this one finishes, so the map fills in rather than resetting (D34: PartialScan).
+                    var r = PartialScan.merge(previous: previous, fresh: partial, roots: cfg.expandedRoots,
+                                              volume: previous?.volume ?? DiskUsage.volume(for: ArboristConfig.home)).result
                     if let v = self.freeBytes, var vol = r.volume { vol.freeBytes = v; r.volume = vol }
                     self.scanned = r
                     self.scheduleRelayout()
@@ -304,6 +310,8 @@ final class AppModel: ObservableObject {
                     self.scanned = r
                     self.pruneFilter()
                     self.resultIsCached = false
+                    self.staleCacheRepos = []
+                    self.lastFullScanDuration = Date().timeIntervalSince(started)
                     self.freeBytes = r.volume?.freeBytes ?? self.freeBytes
                     self.relayout()
                     self.checkLowSpace()
@@ -311,7 +319,12 @@ final class AppModel: ObservableObject {
                     // Hook mode (cleanup disabled) never writes the user's cache.
                     self.saveCache(toSave)
                 case .failed(let message):
-                    self.scanError = message
+                    // D34: keep what streamed in, merged with the cache; repos not reached stay cached and are named.
+                    let m = PartialScan.merge(previous: previous, fresh: partial, roots: cfg.expandedRoots,
+                                              volume: self.scanned?.volume ?? previous?.volume)
+                    if !m.result.repos.isEmpty { self.scanned = m.result; self.relayout() }
+                    self.staleCacheRepos = m.staleCache
+                    self.scanError = message + (m.staleCache.isEmpty ? "" : " \(m.staleCache.count) repos show cached results.")
                 }
             }
             if id == self.scanID {

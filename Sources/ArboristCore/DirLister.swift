@@ -147,7 +147,26 @@ public enum DirLister {
 public final class CancelFlag: @unchecked Sendable {
     private let lock = NSLock()
     private var value = false
+    private var handlers: [Int: @Sendable () -> Void] = [:]
+    private var next = 0
     public init() {}
     public var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return value }
-    public func cancel() { lock.lock(); value = true; lock.unlock() }
+    public func cancel() {
+        lock.lock(); value = true; let hs = Array(handlers.values); handlers = [:]; lock.unlock()
+        hs.forEach { $0() }
+    }
+    /// D34: runs `h` on cancel (at once if already cancelled). Returns a token for `remove`.
+    @discardableResult
+    public func onCancel(_ h: @escaping @Sendable () -> Void) -> Int {
+        lock.lock()
+        if value { lock.unlock(); h(); return -1 }
+        next += 1; let t = next; handlers[t] = h; lock.unlock(); return t
+    }
+    public func remove(_ token: Int) { lock.lock(); handlers[token] = nil; lock.unlock() }
+
+    /// D34: the scan's flag for the current thread, so `Shell.run` can kill its child on cancel.
+    public static var current: CancelFlag? {
+        get { Thread.current.threadDictionary["arborist.cancel"] as? CancelFlag }
+        set { Thread.current.threadDictionary["arborist.cancel"] = newValue }
+    }
 }
