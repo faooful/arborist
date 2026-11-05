@@ -22,8 +22,10 @@ public struct ArboristConfig: Codable, Equatable, Sendable {
         (["~", "~/Documents"], 4), // v1 (D12)
         (["~", "/tmp"], 4),        // D12–D31
     ]
+    /// D34: the scan timeout default before D34.
+    public static let legacyTimeout: Double = 180
     public init(roots: [String], lowSpaceThresholdGB: Double, maxDepth: Int,
-                leafStages: StageMultipliers = .default, showFreeText: Bool = true, scanTimeoutSeconds: Double = 180) {
+                leafStages: StageMultipliers = .default, showFreeText: Bool = true, scanTimeoutSeconds: Double = 600) {
         self.roots = roots; self.lowSpaceThresholdGB = lowSpaceThresholdGB; self.maxDepth = maxDepth
         self.leafStages = leafStages; self.showFreeText = showFreeText
         self.scanTimeoutSeconds = scanTimeoutSeconds
@@ -45,7 +47,9 @@ public struct ArboristConfig: Codable, Equatable, Sendable {
         }
         leafStages = try c.decodeIfPresent(StageMultipliers.self, forKey: .leafStages) ?? d.leafStages
         showFreeText = try c.decodeIfPresent(Bool.self, forKey: .showFreeText) ?? d.showFreeText
-        scanTimeoutSeconds = try c.decodeIfPresent(Double.self, forKey: .scanTimeoutSeconds) ?? d.scanTimeoutSeconds
+        let savedTimeout = try c.decodeIfPresent(Double.self, forKey: .scanTimeoutSeconds)
+        // D34: the old default 180 s moves to the current default; a custom value is kept. Idempotent.
+        scanTimeoutSeconds = savedTimeout.map { $0 == Self.legacyTimeout ? d.scanTimeoutSeconds : $0 } ?? d.scanTimeoutSeconds
     }
 
     public func stage(freeBytes: Int64) -> LeafStage {

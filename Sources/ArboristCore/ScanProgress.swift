@@ -22,21 +22,53 @@ public enum ScanError: Error, Equatable, LocalizedError {
 /// or the deadline, resumes the caller; on timeout the work's CancelFlag is set so it can stop.
 /// The caller never waits for a stuck worker.
 public enum Deadline {
+    /// D34: after a timeout, how long to wait for the cancelled worker to stop (its children are killed),
+    /// so a Retry never overlaps a still-running scan.
+    public static let stopGrace: TimeInterval = 5
     public static func run<T: Sendable>(timeout: TimeInterval,
                                         _ work: @escaping @Sendable (CancelFlag) throws -> T) async throws -> T {
         let cancel = CancelFlag()
         let once = Once()
+        let stopped = DispatchSemaphore(value: 0)
         return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<T, Error>) in
             Thread.detachNewThread {
                 let r = Result { try work(cancel) }
+                stopped.signal()
                 if once.claim() { cont.resume(with: r) }
             }
             DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
                 guard once.claim() else { return }
                 cancel.cancel()
-                cont.resume(throwing: ScanError.timedOut(seconds: Int(timeout.rounded())))
+                Thread.detachNewThread {
+                    _ = stopped.wait(timeout: .now() + stopGrace)
+                    cont.resume(throwing: ScanError.timedOut(seconds: Int(timeout.rounded())))
+                }
             }
         }
+    }
+}
+
+/// D34: the timeout actually used for a scan. At least the configured value; grows to twice the last full
+/// (not timed-out) scan's duration, capped at `cap` (a configured value above the cap is kept).
+public enum ScanTimeout {
+    public static let cap: TimeInterval = 1800
+    public static func effective(configured: TimeInterval, lastFullDuration: TimeInterval?) -> TimeInterval {
+        guard let d = lastFullDuration, d > 0 else { return configured }
+        return max(configured, min(cap, 2 * d))
+    }
+}
+
+/// D34: what the map shows while a scan streams in, and after it times out: fresh repos replace their
+/// cached versions; cached repos not refreshed are kept and listed in `staleCache`.
+public enum PartialScan {
+    public static func merge(previous: ScanResult?, fresh: [Repo], roots: [String], volume: VolumeInfo?)
+        -> (result: ScanResult, staleCache: Set<String>) {
+        let freshPaths = Set(fresh.map(\.path))
+        let kept = (previous?.repos ?? []).filter { !freshPaths.contains($0.path) }
+        let r = ScanResult(scannedAt: previous?.scannedAt ?? Date(), roots: roots, volume: volume ?? previous?.volume,
+                           repos: (fresh + kept).sorted { $0.size.total > $1.size.total },
+                           caches: previous?.caches ?? [], skippedPaths: 0)
+        return (r, Set(kept.map(\.path)))
     }
 }
 

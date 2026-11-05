@@ -22,6 +22,8 @@ public final class Scanner: Sendable {
     /// `onEvent` is called from worker threads. When `cancel` is set, workers stop early and the
     /// partial result is returned (callers that timed out ignore it).
     public func scan(cancel: CancelFlag?, onEvent: @escaping @Sendable (ScanEvent) -> Void) -> ScanResult {
+        CancelFlag.current = cancel
+        defer { CancelFlag.current = nil }
         let roots = config.expandedRoots
         let volume = DiskUsage.volume(for: ArboristConfig.home)
         onEvent(.volume(volume))
@@ -57,6 +59,8 @@ public final class Scanner: Sendable {
             let (ri, wi, p) = flat[i]
             queue.addOperation {
                 if cancel?.isCancelled == true { return }
+                CancelFlag.current = cancel
+                defer { CancelFlag.current = nil }
                 var s = 0
                 let wt = self.inspect(p, isMain: wi == 0, repoPath: jobs[ri].path, git: jobs[ri].git,
                                       skipped: &s, cancel: cancel)
@@ -216,6 +220,7 @@ public final class Scanner: Sendable {
             w.removeCommand = isMain ? nil : "git -C \(Shell.quote(repoPath)) worktree prune"
             return w
         }
+        if cancel?.isCancelled == true { return w }
         if let d = Shell.git(p.path, "log", "-1", "--format=%cI%x1f%s") {
             let parts = d.split(separator: "\u{1f}", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
             w.lastCommitDate = ISO8601DateFormatter().date(from: parts[0])

@@ -16,8 +16,15 @@ public enum Shell {
         let out = Pipe()
         p.standardOutput = out
         p.standardError = FileHandle.nullDevice
+        let cancel = CancelFlag.current
+        if cancel?.isCancelled == true { return nil }
         do { try p.run() } catch { return nil }
-        let timer = DispatchWorkItem { if p.isRunning { p.terminate() } }
+        // D34: a scan timeout kills the running child (git, gh, docker) instead of waiting it out.
+        // SIGKILL, not terminate(): a child spawned from a worker thread can inherit a mask that blocks SIGTERM.
+        // Read-only queries, so nothing is left half-written.
+        let token = cancel?.onCancel { if p.isRunning { kill(p.processIdentifier, SIGKILL) } }
+        defer { if let token { cancel?.remove(token) } }
+        let timer = DispatchWorkItem { if p.isRunning { kill(p.processIdentifier, SIGKILL) } }
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: timer)
         let data = (try? out.fileHandleForReading.readToEnd()) ?? Data()
         try? out.fileHandleForReading.close()

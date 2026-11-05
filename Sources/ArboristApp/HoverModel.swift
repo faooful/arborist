@@ -57,6 +57,9 @@ final class HoverModel: ObservableObject {
     var drawnConfirmButtons: [(name: String, rect: Rect)]?
     /// D33: the header Refresh button's drawn frame, for `--action-check`.
     var drawnRefresh: Rect?
+    /// D34: whether the Refresh icon is spinning, and the footer icons' glyph boxes, for `--action-check`.
+    var refreshSpinning = false
+    var drawnFooterIcons: [(name: String, rect: Rect)] = []
     /// D30: the confirm's drawn frame, for `--confirm-check`.
     var drawnConfirmPanel: Rect?
 
