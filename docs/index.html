@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<title>Arborist: your git worktrees, as leaves</title>
+<meta name="description" content="Visualise your worktrees and sweep away the ones you don't need.">
+<style>
+@font-face{font-family:"Fraunces";src:url(assets/fonts/fraunces-latin.woff2) format("woff2");font-weight:300 700;font-style:normal;font-display:swap}
+@font-face{font-family:"Inter";src:url(assets/fonts/inter-latin.woff2) format("woff2");font-weight:400 600;font-style:normal;font-display:swap}
+:root{
+  --ground:#efeadf; --paper:#f6f3ec; --moss:#7d8a6a; --moss-deep:#4a5640; --sage:#c9d0bd; --tan:#c9a97e; --deps:#e4e6d3;
+  --ink:#3f4a35; --ink-2:#6f7262; --ink-3:#a19c88;
+  --ease:cubic-bezier(.2,.8,.2,1);
+}
+*{box-sizing:border-box;margin:0}
+html{background:#8f9c7c;color:var(--ink);font:16px/1.5 "Inter",system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+body{position:relative;min-height:100vh;background:var(--ground)}
+/* html carries the canopy-floor colour, so any sliver past the body (mobile toolbars, overscroll) reads as foliage, not a pale strip */
+
+
+/* full-bleed dithered foliage scene */
+#scene{position:absolute;top:0;left:0;width:100%;z-index:0;image-rendering:pixelated;image-rendering:crisp-edges;display:block}
+/* one composition */
+.stage{position:relative;z-index:1;max-width:1240px;margin:0 auto;padding:0 48px;min-height:100vh;
+  display:grid;grid-template-columns:minmax(0,1fr) min(572px,56%);column-gap:clamp(48px,6vw,80px);align-items:center}
+.copy{padding:0 0 40px}
+h1{font-family:"Fraunces",ui-serif,Georgia,serif;font-size:clamp(72px,7.6vw,104px);line-height:.92;letter-spacing:-.03em;font-weight:440;font-variation-settings:"opsz" 144;color:var(--moss-deep)}
+.tag{font-size:17px;line-height:1.5;letter-spacing:-.005em;color:#4f5844;margin-top:22px;max-width:21em}
+.cta{display:inline-flex;align-items:center;gap:12px;margin-top:32px;height:46px;padding:0 22px 0 2px;white-space:nowrap;border-radius:999px;background:var(--moss-deep);color:#fbf8ef;font-size:15px;font-weight:550;text-decoration:none;
+  box-shadow:0 1px 0 #ffffff26 inset,0 1px 2px #4a564033;transition:background .16s var(--ease),transform .16s var(--ease)}
+.cta .ic{width:42px;height:42px;border-radius:50%;background:#fbf8ef;color:var(--moss-deep);display:grid;place-items:center}
+.cta:hover{background:#56644a}.cta:active{transform:translateY(1px)}
+.cta:focus-visible{outline:2px solid var(--moss);outline-offset:3px}
+
+/* menu-bar extra: icon, caret, popover */
+.extra{position:relative;display:flex;flex-direction:column;align-items:flex-end;padding:44px 0 32px}
+.icon{width:84px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;gap:3px;background:#f6f3ec;box-shadow:0 0 0 .5px #4a564040,0 2px 6px #4a564026;margin-right:30px}
+.icon .gb{font-size:13px;font-weight:500;letter-spacing:-.01em;color:#3f4a35;font-variant-numeric:tabular-nums}
+.pop{margin-top:8px;width:100%;position:relative;transform-origin:calc(100% - 72px) 0;
+  filter:drop-shadow(0 24px 40px #4a564030) drop-shadow(0 2px 6px #4a56401a)}
+.pop .caret{position:absolute;z-index:2;top:-9px;right:63px;width:18px;height:10px;display:block;overflow:visible}
+.pop img{display:block;width:100%;height:auto;border-radius:14px;box-shadow:0 0 0 .5px #4a564038}
+.loaded .pop{animation:open 220ms var(--ease) both}
+@keyframes open{from{opacity:0;transform:scale(.94) translateY(-4px)}to{opacity:1;transform:none}}
+
+@media (max-width:900px){
+    .stage{grid-template-columns:1fr;padding:0 20px;min-height:0}
+  .copy{padding:64px 0 8px;text-align:center}
+  h1{font-size:68px}.tag{font-size:16px;margin-inline:auto}
+  .extra{padding:40px 0 56px;max-width:572px;width:100%;margin:0 auto}
+  .icon{margin-right:22px}.pop .caret{right:55px}.pop{transform-origin:calc(100% - 64px) 0}
+}
+/* canopy sway: one GPU transform on the canvas, no redraw; ~4px over 34s */
+#scene{will-change:transform;animation:sway 34s ease-in-out infinite alternate}
+@keyframes sway{from{transform:translate3d(0,0,0) scale(1.012)}to{transform:translate3d(-4px,3px,0) scale(1.012)}}
+/* clip the scaled canvas on both axes so it adds no scroll width or a bare strip at the bottom */
+html{overflow-x:hidden}body{overflow:clip}
+@media (prefers-reduced-motion:reduce){
+  #scene{animation:none;transform:scale(1.012)}
+  .loaded .pop{animation:fade 120ms linear both}
+  @keyframes fade{from{opacity:0}to{opacity:1}}
+}
+</style>
+</head>
+<body>
+<canvas id="scene" aria-hidden="true"></canvas>
+
+
+<main class="stage">
+  <section class="copy">
+    <h1>Arborist</h1>
+    <p class="tag">Visualise your worktrees and sweep away the ones you don't need.</p>
+    <a class="cta" href="https://github.com/faooful/arborist">
+      <span class="ic"><svg width="20" height="20" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 .2a8 8 0 0 0-2.5 15.6c.4 0 .5-.2.5-.4v-1.5c-2.2.5-2.7-1-2.7-1-.4-.9-.9-1.2-.9-1.2-.7-.5.1-.5.1-.5.8.1 1.2.8 1.2.8.7 1.3 1.9.9 2.4.7 0-.5.3-.9.5-1.1-1.8-.2-3.6-.9-3.6-4 0-.9.3-1.6.8-2.1-.1-.2-.4-1 .1-2.1 0 0 .7-.2 2.2.8a7.5 7.5 0 0 1 4 0c1.5-1 2.2-.8 2.2-.8.4 1.1.2 1.9.1 2.1.5.6.8 1.3.8 2.1 0 3.1-1.9 3.8-3.7 4 .3.3.6.8.6 1.5v2.2c0 .2.1.5.6.4A8 8 0 0 0 8 .2"/></svg></span>
+      Get it on GitHub
+    </a>
+  </section>
+
+  <section class="extra" aria-label="Arborist menu bar popover">
+    <div class="icon" aria-hidden="true">
+      <svg width="19" height="19" viewBox="0 0 20 20"><path d="M3,16C3,8 8,3 17,3C17,12 12,17 4,17Z" fill="#4a5640"/><path d="M4.5,15.5C8,12 11,9 14,6" stroke="#efeadf" stroke-opacity=".7" stroke-width=".9" fill="none" stroke-linecap="round"/></svg><span class="gb">225 GB</span>
+    </div>
+    <div class="pop">
+      <svg class="caret" width="18" height="10" viewBox="0 0 16 9" aria-hidden="true"><path d="M0,9C3.5,9 5.6,1.6 8,1.6S12.5,9 16,9Z" fill="#f6f3ec"/><path d="M0,9C3.5,9 5.6,1.6 8,1.6S12.5,9 16,9" fill="none" stroke="#4a564038" stroke-width=".5"/></svg>
+      <!-- ============================== SWAP ==============================
+           Panel = `arborist render --busy` from faooful/arborist (built on Linux, Swift 6.0.3) with
+           LeafSample.busy names swapped for invented ones (orchard, lantern, quill, ...; branches
+           fern-sync, moss-cache, ...) in a scratch copy, no "Linux render" note. Corners masked to 14px at 2x.
+           All names are invented sample data.
+           To swap: drop a new 2x popover PNG at assets/panel.png (transparent rounded corners)
+           and set width/height below to its 1x size. Caret colour = panel ground #f6f3ec.
+           ================================================================== -->
+      <img src="assets/panel.png" width="480" height="654" alt="Arborist popover: 76 worktrees in 35 repos drawn as leaves, 7 stale, 225 GB free, with a Clear 7 button (invented sample data)">
+    </div>
+  </section>
+</main>
+
+<script>
+// panel eases in from the icon once; resting state is open
+requestAnimationFrame(()=>document.body.classList.add('loaded'));
+// Full-bleed foliage scene: a dark moss canopy at the edges, two soft clearings (behind the copy and
+// behind the panel), then a 4x4 Bayer ordered dither to the H8 palette at 1/2 res (cell = 2 CSS px).
+(()=>{
+  const cv=document.getElementById('scene'),P=[[246,243,236],[228,230,211],[201,208,189],[166,176,146],[125,138,106],[90,104,76],[74,86,64],[201,169,126],[176,146,104]];
+  const B=[0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5];
+  function draw(){
+    const S=2,DH=Math.max(document.documentElement.scrollHeight,innerHeight),W=Math.ceil(document.documentElement.clientWidth/S),H=Math.ceil(DH/S);cv.width=W;cv.height=H;cv.style.height=DH+'px';
+    const x=cv.getContext('2d');let s=11;const rn=()=>(s=s*16807%2147483647)/2147483647;
+    const r2=e=>{const b=e.getBoundingClientRect();return{cx:(b.left+b.width/2)/S,cy:(b.top+scrollY+b.height/2)/S,rx:b.width/S,ry:b.height/S}};
+    const cp=r2(document.querySelector('.copy')),pp=r2(document.querySelector('.pop img'));
+    // clearing field: 0 inside either clearing, 1 out in the canopy
+    const ell=(px,py,c,k)=>Math.hypot((px-c.cx)/(c.rx*k),(py-c.cy)/(c.ry*k));
+    const field=(px,py)=>Math.min(ell(px,py,cp,.95),ell(px,py,pp,.82));
+    const g=x.createLinearGradient(0,0,0,H);g.addColorStop(0,'#a6b092');g.addColorStop(1,'#8f9c7c');x.fillStyle=g;x.fillRect(0,0,W,H);
+    const cols=['#4a5640','#5a684c','#5a684c','#7d8a6a','#7d8a6a','#a6b092','#b09268'];
+    const n=Math.round(W*H/90);
+    for(let i=0;i<n;i++){
+      const px=rn()*W,py=rn()*H,f=field(px,py);if(f<.75)continue;
+      const sz=(9+rn()*13)*Math.min(1.5,.75+f*.3),a=rn()*6.283,c=cols[Math.floor(rn()*cols.length)];
+      x.save();x.translate(px,py);x.rotate(a);x.fillStyle=c;x.globalAlpha=.75+rn()*.25;
+      x.beginPath();x.moveTo(-sz,0);x.quadraticCurveTo(0,-sz*.6,sz,0);x.quadraticCurveTo(0,sz*.6,-sz,0);x.fill();
+      x.strokeStyle='#f6f3ec';x.globalAlpha=.16;x.lineWidth=.6;x.beginPath();x.moveTo(-sz*.85,0);x.lineTo(sz*.85,0);x.stroke();
+      x.restore();
+    }
+    // clearings: paper behind the copy, pale sage behind the panel (so the cream panel pops)
+    const glow=(c,k,col)=>{const R=Math.max(c.rx,c.ry)*k,gr=x.createRadialGradient(c.cx,c.cy,0,c.cx,c.cy,R);gr.addColorStop(0,col+'ff');gr.addColorStop(.55,col+'f0');gr.addColorStop(1,col+'00');
+      x.save();x.translate(c.cx,c.cy);x.scale(c.rx/Math.max(c.rx,c.ry),c.ry/Math.max(c.rx,c.ry));x.translate(-c.cx,-c.cy);x.fillStyle=gr;x.fillRect(-W*3,-H*3,W*7,H*7);x.restore()};
+    glow(pp,1.05,'#d3d9c6');glow(cp,1.1,'#f6f3ec');
+    // ordered dither; amplitude fades to near zero inside the clearings
+    const im=x.getImageData(0,0,W,H),dt=im.data;
+    for(let yy=0;yy<H;yy++)for(let xx=0;xx<W;xx++){
+      const k=(yy*W+xx)*4,amp=8+26*Math.min(1,Math.max(0,(field(xx,yy)-.55)/.5)),t=(B[(yy&3)*4+(xx&3)]/16-.47)*amp;
+      const r=dt[k]+t,gg=dt[k+1]+t,b=dt[k+2]+t;let bi=0,bd=1e9;
+      for(let j=0;j<P.length;j++){const p=P[j],e=(r-p[0])**2*.3+(gg-p[1])**2*.59+(b-p[2])**2*.11;if(e<bd){bd=e;bi=j}}
+      dt[k]=P[bi][0];dt[k+1]=P[bi][1];dt[k+2]=P[bi][2];
+    }
+    x.putImageData(im,0,0);
+  }
+  addEventListener('load',draw);let tm,lw=0,lh=0;const later=()=>{clearTimeout(tm);tm=setTimeout(draw,150)};addEventListener('resize',later);
+  // redraw if the document height changes (fonts, panel image, mobile toolbar), so no bare strip at the bottom
+  new ResizeObserver(()=>{const w=innerWidth,h=document.documentElement.scrollHeight;if(w!==lw||h!==lh){lw=w;lh=h;later()}}).observe(document.body);
+})();
+</script>
+</body>
+</html>
