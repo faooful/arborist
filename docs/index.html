@@ -20,7 +20,7 @@ body{position:relative;height:100vh;height:100dvh;overflow:hidden;padding:var(--
 :root{--inset:clamp(8px,1vw,12px);--sh:calc(100dvh - 2*var(--inset));--pw:min(572px,calc((var(--sh) - 120px)*.734),52vw)}
 
 /* full-bleed dithered foliage scene, 16px oversize on every side so the drift never shows an edge */
-#scene{position:absolute;top:-16px;left:-16px;width:calc(100% + 32px);height:calc(100% + 32px);z-index:0;pointer-events:none;image-rendering:pixelated;image-rendering:crisp-edges;display:block}
+#scene{position:absolute;top:-8px;left:-8px;width:calc(100% + 16px);height:calc(100% + 16px);z-index:0;pointer-events:none;image-rendering:pixelated;image-rendering:crisp-edges;display:block}
 /* rounded inset stage: the canopy and floor colour read as a frame around it */
 .stage{position:relative;z-index:2;height:var(--sh);border-radius:22px;padding:0 clamp(24px,4.5vw,72px);
   overflow:hidden;isolation:isolate;box-shadow:0 0 0 .5px #3f4a3540;
@@ -80,8 +80,7 @@ h1{font-family:"Fraunces",ui-serif,Georgia,serif;font-size:clamp(44px,min(7vw,12
   .icon{margin-right:22px}.pop .caret{right:55px}.pop{transform-origin:calc(100% - 64px) 0}
 }
 /* canopy drift: one GPU transform on the canvas, no redraw; ~12px over 30s */
-#scene{will-change:transform;animation:sway 30s ease-in-out infinite alternate}
-@keyframes sway{from{transform:translate3d(6px,-5px,0)}to{transform:translate3d(-6px,5px,0)}}
+#scene{transform:none}
 @media (prefers-reduced-motion:reduce){
   #scene{animation:none;transform:none}.fall{display:none}
   *,*::before,*::after{transition:none!important;animation:none!important}
@@ -138,45 +137,64 @@ h1{font-family:"Fraunces",ui-serif,Georgia,serif;font-size:clamp(44px,min(7vw,12
 <script>
 // panel eases in from the icon once; resting state is open
 requestAnimationFrame(()=>document.body.classList.add('loaded'));
-// Full-bleed foliage scene: a dark moss canopy at the edges, two soft clearings (behind the copy and
-// behind the panel), then a 4x4 Bayer ordered dither to the H8 palette at 1/2 res (cell = 2 CSS px).
+// Canopy scene, animated (v5.3): leaves sway on a slow wind field, re-dithered every frame at 1/2 res
+// (cell = 2 CSS px) with a screen-fixed 4x4 Bayer matrix to the H8 palette. ~15fps, paused when hidden
+// or offscreen; reduced motion = one static frame.
 (()=>{
   const cv=document.getElementById('scene'),P=[[246,243,236],[228,230,211],[201,208,189],[166,176,146],[125,138,106],[90,104,76],[74,86,64],[201,169,126],[176,146,104]];
-  const B=[0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5];
-  function draw(){
-    const S=2,O=16,st=cv.parentNode.getBoundingClientRect(),W=Math.ceil((st.width+2*O)/S),H=Math.ceil((st.height+2*O)/S);cv.width=W;cv.height=H;
-    const x=cv.getContext('2d');let s=11;const rn=()=>(s=s*16807%2147483647)/2147483647;
+  const B=[0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5],RM=matchMedia('(prefers-reduced-motion: reduce)'),FPS=15;
+  // palette lookup: 32 levels per channel -> nearest palette index (perceptual weights as before)
+  const LUT=new Uint8Array(32768);for(let r=0;r<32;r++)for(let g=0;g<32;g++)for(let b=0;b<32;b++){let bi=0,bd=1e9;const R=r*8+4,G=g*8+4,Bb=b*8+4;
+    for(let j=0;j<P.length;j++){const q=P[j],e=(R-q[0])**2*.3+(G-q[1])**2*.59+(Bb-q[2])**2*.11;if(e<bd){bd=e;bi=j}}LUT[r<<10|g<<5|b]=bi}
+  let W,H,x,base,leaves,amp,im,run=false,vis=true,last=0,raf=0;
+  window.__ft=[];
+  function setup(){
+    // backbuffer cap: cell = 2 CSS px up to the 1440x900 half-res budget (~728x458 px); on bigger screens the
+    // cell grows in whole CSS px (integer S) so the backbuffer stays near that budget and the dither stays crisp.
+    const O=8,st=cv.parentNode.getBoundingClientRect(),CAP=728*458,S=Math.max(2,Math.ceil(Math.sqrt((st.width+2*O)*(st.height+2*O)/CAP)));
+    W=Math.ceil((st.width+2*O)/S);H=Math.ceil((st.height+2*O)/S);cv.width=W;cv.height=H;cv.style.width=W*S+'px';cv.style.height=H*S+'px';cv.dataset.cell=S;
+    x=cv.getContext('2d',{willReadFrequently:true});let s=11;const rn=()=>(s=s*16807%2147483647)/2147483647;
     const r2=e=>{const b=e.getBoundingClientRect();return{cx:(b.left-st.left+O+b.width/2)/S,cy:(b.top-st.top+O+b.height/2)/S,rx:b.width/S,ry:b.height/S}};
     const cp=r2(document.querySelector('.copy')),pp=r2(document.querySelector('.pop .panel'));
-    // clearing field: 0 inside either clearing, 1 out in the canopy
     const ell=(px,py,c,k)=>Math.hypot((px-c.cx)/(c.rx*k),(py-c.cy)/(c.ry*k));
     const M=innerWidth<=720,field=(px,py)=>Math.min(ell(px,py,cp,M?.72:.95),ell(px,py,pp,M?.66:.82));
-    const g=x.createLinearGradient(0,0,0,H);g.addColorStop(0,'#a6b092');g.addColorStop(1,'#8f9c7c');x.fillStyle=g;x.fillRect(0,0,W,H);
+    // static layers: gradient floor (under the leaves) and the clearing glows (over them)
+    base=document.createElement('canvas');base.width=W;base.height=H;const bx=base.getContext('2d');
+    const g=bx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#a6b092');g.addColorStop(1,'#8f9c7c');bx.fillStyle=g;bx.fillRect(0,0,W,H);
+    const glowC=document.createElement('canvas');glowC.width=W;glowC.height=H;const gx=glowC.getContext('2d');
+    const glow=(c,k,col)=>{const R=Math.max(c.rx,c.ry)*k,gr=gx.createRadialGradient(c.cx,c.cy,0,c.cx,c.cy,R);gr.addColorStop(0,col+'ff');gr.addColorStop(.55,col+'f0');gr.addColorStop(1,col+'00');
+      gx.save();gx.translate(c.cx,c.cy);gx.scale(c.rx/Math.max(c.rx,c.ry),c.ry/Math.max(c.rx,c.ry));gx.translate(-c.cx,-c.cy);gx.fillStyle=gr;gx.fillRect(-W*3,-H*3,W*7,H*7);gx.restore()};
+    glow(pp,1.05,'#d3d9c6');glow(cp,1.1,'#f6f3ec');base.glow=glowC;
     const cols=['#4a5640','#5a684c','#5a684c','#7d8a6a','#7d8a6a','#a6b092','#b09268'];
-    const n=Math.round(W*H/90);
-    for(let i=0;i<n;i++){
-      const px=rn()*W,py=rn()*H,f=field(px,py);if(f<.75)continue;
-      const sz=(9+rn()*13)*Math.min(1.5,.75+f*.3),a=rn()*6.283,c=cols[Math.floor(rn()*cols.length)];
-      x.save();x.translate(px,py);x.rotate(a);x.fillStyle=c;x.globalAlpha=.75+rn()*.25;
-      x.beginPath();x.moveTo(-sz,0);x.quadraticCurveTo(0,-sz*.6,sz,0);x.quadraticCurveTo(0,sz*.6,-sz,0);x.fill();
-      x.strokeStyle='#f6f3ec';x.globalAlpha=.16;x.lineWidth=.6;x.beginPath();x.moveTo(-sz*.85,0);x.lineTo(sz*.85,0);x.stroke();
-      x.restore();
-    }
-    // clearings: paper behind the copy, pale sage behind the panel (so the cream panel pops)
-    const glow=(c,k,col)=>{const R=Math.max(c.rx,c.ry)*k,gr=x.createRadialGradient(c.cx,c.cy,0,c.cx,c.cy,R);gr.addColorStop(0,col+'ff');gr.addColorStop(.55,col+'f0');gr.addColorStop(1,col+'00');
-      x.save();x.translate(c.cx,c.cy);x.scale(c.rx/Math.max(c.rx,c.ry),c.ry/Math.max(c.rx,c.ry));x.translate(-c.cx,-c.cy);x.fillStyle=gr;x.fillRect(-W*3,-H*3,W*7,H*7);x.restore()};
-    glow(pp,1.05,'#d3d9c6');glow(cp,1.1,'#f6f3ec');
-    // ordered dither; amplitude fades to near zero inside the clearings
-    const im=x.getImageData(0,0,W,H),dt=im.data;
-    for(let yy=0;yy<H;yy++)for(let xx=0;xx<W;xx++){
-      const k=(yy*W+xx)*4,amp=8+26*Math.min(1,Math.max(0,(field(xx,yy)-.55)/.5)),t=(B[(yy&3)*4+(xx&3)]/16-.47)*amp;
-      const r=dt[k]+t,gg=dt[k+1]+t,b=dt[k+2]+t;let bi=0,bd=1e9;
-      for(let j=0;j<P.length;j++){const p=P[j],e=(r-p[0])**2*.3+(gg-p[1])**2*.59+(b-p[2])**2*.11;if(e<bd){bd=e;bi=j}}
-      dt[k]=P[bi][0];dt[k+1]=P[bi][1];dt[k+2]=P[bi][2];
-    }
-    x.putImageData(im,0,0);
+    leaves=[];const n=Math.round(W*H/90);
+    for(let i=0;i<n;i++){const px=rn()*W,py=rn()*H,f=field(px,py);if(f<.75)continue;
+      leaves.push({px,py,sz:(9+rn()*13)*Math.min(1.5,.75+f*.3),a:rn()*6.283,c:cols[Math.floor(rn()*cols.length)],al:.75+rn()*.25,
+        k:Math.min(1,(f-.75)/.6)})} // k: sway strength, 0 at the clearing rim so the clearings stay calm
+    amp=new Float32Array(W*H);for(let yy=0;yy<H;yy++)for(let xx=0;xx<W;xx++){const T=B[(yy&3)*4+(xx&3)]/16-.47;amp[yy*W+xx]=T*(8+26*Math.min(1,Math.max(0,(field(xx,yy)-.55)/.5)))}
+    frame(0);
   }
-  addEventListener('load',draw);let tm;addEventListener('resize',()=>{clearTimeout(tm);tm=setTimeout(draw,150)});
+  // wind: two slow travelling waves; nearby leaves share phase so they move together
+  const wind=(px,py,t)=>Math.sin(px*.021+py*.007-t*.55)*.6+Math.sin(px*.009-py*.017-t*.31+1.7)*.4;
+  function frame(t){
+    const t0=performance.now();
+    x.globalAlpha=1;x.drawImage(base,0,0);
+    const DX=Math.sin(t*.07)*3,DY=Math.cos(t*.053)*2; // slow whole-canopy drift (~6 CSS px each way), pattern stays fixed
+    for(const l of leaves){const w=wind(l.px,l.py,t)*l.k,g2=wind(l.py,l.px,t*.8)*l.k;
+      x.setTransform(Math.cos(l.a+w*.16),Math.sin(l.a+w*.16),-Math.sin(l.a+w*.16),Math.cos(l.a+w*.16),l.px+w*1.6+DX*l.k,l.py+g2*1.1+DY*l.k);
+      const sz=l.sz;x.fillStyle=l.c;x.globalAlpha=l.al;x.beginPath();x.moveTo(-sz,0);x.quadraticCurveTo(0,-sz*.6,sz,0);x.quadraticCurveTo(0,sz*.6,-sz,0);x.fill();
+      x.strokeStyle='#f6f3ec';x.globalAlpha=.16;x.lineWidth=.6;x.beginPath();x.moveTo(-sz*.85,0);x.lineTo(sz*.85,0);x.stroke()}
+    x.setTransform(1,0,0,1,0,0);x.globalAlpha=1;x.drawImage(base.glow,0,0);
+    im=x.getImageData(0,0,W,H);const d=im.data,N=W*H;
+    for(let i=0,k=0;i<N;i++,k+=4){const t2=amp[i];let r=d[k]+t2,g=d[k+1]+t2,b=d[k+2]+t2;
+      r=r<0?0:r>255?255:r;g=g<0?0:g>255?255:g;b=b<0?0:b>255?255:b;const q=P[LUT[(r>>3)<<10|(g>>3)<<5|(b>>3)]];d[k]=q[0];d[k+1]=q[1];d[k+2]=q[2]}
+    x.putImageData(im,0,0);
+    __ft.push(performance.now()-t0);if(__ft.length>120)__ft.shift();
+  }
+  function loop(now){raf=0;if(!run)return;if(now-last>=1000/FPS-2){last=now;frame(now/1000)}raf=requestAnimationFrame(loop)}
+  function update(){const go=!RM.matches&&vis&&!document.hidden&&!!x;if(go&&!run){run=true;raf||(raf=requestAnimationFrame(loop))}else if(!go){run=false}}
+  new IntersectionObserver(e=>{vis=e[0].isIntersecting;update()}).observe(cv);
+  document.addEventListener('visibilitychange',update);RM.addEventListener('change',()=>{update();if(RM.matches)frame(0)});
+  addEventListener('load',()=>{setup();update()});let tm;addEventListener('resize',()=>{clearTimeout(tm);tm=setTimeout(()=>{setup();update()},150)});
 })();
 </script>
 <script>
