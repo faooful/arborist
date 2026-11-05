@@ -6,6 +6,7 @@
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <title>Arborist: your git worktrees, as leaves</title>
 <meta name="description" content="Visualise your worktrees and sweep away the ones you don't need.">
+<script>/* v5.5: arm entrance only with motion allowed and JS on */if(!matchMedia('(prefers-reduced-motion: reduce)').matches)document.documentElement.classList.add('in');window.__t0=performance.now();</script>
 <style>
 @font-face{font-family:"Fraunces";src:url(assets/fonts/fraunces-latin.woff2) format("woff2");font-weight:300 700;font-style:normal;font-display:swap}
 @font-face{font-family:"Inter";src:url(assets/fonts/inter-latin.woff2) format("woff2");font-weight:400 600;font-style:normal;font-display:swap}
@@ -43,8 +44,8 @@ h1{font-family:"Fraunces",ui-serif,Georgia,serif;font-size:clamp(44px,min(7vw,12
 .pop .caret{position:absolute;z-index:2;top:-9px;right:63px;width:18px;height:10px;display:block;overflow:visible}
 .pop .panel{display:block;width:100%;height:auto;aspect-ratio:480/654;border-radius:14px;box-shadow:0 0 0 .5px #4a564038;overflow:hidden;background:#f6f3ec}
 .pop .panel svg{display:block;width:100%;height:100%}
-.pop{transition:opacity .22s var(--ease),transform .26s var(--ease)}
-.pop.shut{opacity:0;transform:scale(.94) translateY(-6px);pointer-events:none}
+.pop{transition:opacity .2s var(--ease),transform .24s var(--ease)}
+.pop.shut{opacity:0;transform:scale(.96) translateY(-6px);pointer-events:none}
 .icon:active{transform:translateY(1px)}.icon:focus-visible{outline:2px solid var(--moss);outline-offset:3px}
 /* live panel */
 .lf{transform-box:fill-box;transform-origin:50% 50%;transition:transform .18s var(--ease),opacity .2s;cursor:default}
@@ -52,7 +53,7 @@ h1{font-family:"Fraunces",ui-serif,Georgia,serif;font-size:clamp(44px,min(7vw,12
 .lf.hov{transform:translateY(-2px) scale(1.04);filter:url(#ls)}
 .lf.off{opacity:.42}
 .lf.gone{transition:transform 1s cubic-bezier(.5,0,.8,.4),opacity 1s ease-in;opacity:0}
-.enter .lf{animation:rise .6s var(--ease) both;animation-delay:calc(var(--i)*5ms)}
+.enter .lf{animation:rise .45s var(--ease) both;animation-delay:calc(90ms + var(--i)*3ms)}
 @keyframes rise{from{opacity:0;transform:translateY(8px) scale(.96)}}
 .settle .lf:not(.gone){animation:settle .9s var(--ease) both;animation-delay:calc(var(--i)*4ms)}
 @keyframes settle{0%{transform:none}35%{transform:translateY(3px)}100%{transform:none}}
@@ -70,6 +71,45 @@ h1{font-family:"Fraunces",ui-serif,Georgia,serif;font-size:clamp(44px,min(7vw,12
 @keyframes spin{from{transform:rotate(-28deg)}to{transform:rotate(34deg)}}
 .loaded .pop{animation:open 220ms var(--ease) both}
 @keyframes open{from{opacity:0;transform:scale(.94) translateY(-4px)}to{opacity:1;transform:none}}
+
+/* v5.5 entrance: html.in set in <head> (motion allowed only); .go starts it; both removed at 2400ms */
+:root{--in:cubic-bezier(.2,.7,.2,1)}
+html.in .stage{opacity:0;transform:scale(.985)}
+html.in .veil{display:block}
+html.in h1 .ch,html.in .tag,html.in .cta{opacity:0;transform:translateY(8px)}
+html.in .icon{opacity:0;transform:translateY(-4px)}
+html.in .icon>*{opacity:0}
+html.in .fall{opacity:0}
+html.in.go .stage{animation:inStage 600ms var(--in) 0ms both}
+html.in.go .veil::before{animation:inOut 600ms var(--in) 100ms both}
+html.in.go .veil i{animation:inOut 700ms var(--in) both}
+html.in.go .veil i:nth-child(1){animation-delay:250ms}
+html.in.go .veil i:nth-child(2){animation-delay:400ms}
+html.in.go .veil i:nth-child(3){animation-delay:550ms}
+html.in.go .veil i:nth-child(4){animation-delay:700ms}
+html.in.go h1 .ch{animation:inRise 500ms var(--in) calc(350ms + var(--c)*35ms) both}
+html.in.go .tag{animation:inRise 560ms var(--in) 620ms both}
+html.in.go .cta{animation:inRise 560ms var(--in) 740ms both}
+html.in.go .icon{animation:inDrop 360ms var(--in) 880ms both}
+html.in.go .icon>*{animation:inFade 240ms var(--in) 1060ms both}
+html.in.go .fall{animation:inFade 600ms linear 1500ms both}
+h1 .ch{display:inline-block}
+/* canopy resolves by region: a paper veil (base + 4 soft regional blobs) fades out in steps */
+.veil{display:none;position:absolute;inset:0;z-index:1;pointer-events:none}
+.veil::before{content:"";position:absolute;inset:0;background:#efeadf}
+.veil i{position:absolute;inset:-20%;background:radial-gradient(closest-side,#efeadf 55%,#efeadf00)}
+.veil i:nth-child(1){transform:translate(-30%,-30%)}.veil i:nth-child(2){transform:translate(30%,30%)}
+.veil i:nth-child(3){transform:translate(30%,-30%)}.veil i:nth-child(4){transform:translate(-30%,30%)}
+@keyframes inStage{from{opacity:0;transform:scale(.985)}to{opacity:1;transform:none}}
+@keyframes inFade{from{opacity:0}to{opacity:1}}
+@keyframes inOut{from{opacity:1}to{opacity:0}}
+@keyframes inRise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes inDrop{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+/* menu-bar extra pressed/highlighted while its popover is open (macOS behaviour) */
+.icon[aria-expanded=true]{background:#e6e3d6}
+/* panel contents stagger when it opens */
+.enter .pz-h{animation:rise .32s var(--ease) 40ms both}
+.enter .pz-f{animation:rise .32s var(--ease) 380ms both}
 
 @media (max-width:720px){
   :root{--inset:7px;--pw:min(100%,calc((var(--sh) - 290px)*.734))}
@@ -99,6 +139,7 @@ h1{font-family:"Fraunces",ui-serif,Georgia,serif;font-size:clamp(44px,min(7vw,12
 
 <main class="stage">
 <canvas id="scene" aria-hidden="true"></canvas>
+<div class="veil" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
 <div class="fall" aria-hidden="true">
   <svg style="left:9%;--d:31s;--dl:-4s;--dx:60px" viewBox="0 0 40 24"><use href="#leaf" fill="#7d8a6a"/><use href="#leaf" fill="url(#fd)"/></svg>
   <svg style="left:27%;--d:38s;--dl:-21s;--dx:-40px;width:22px" viewBox="0 0 40 24"><use href="#leaf" fill="#c9a97e"/><use href="#leaf" fill="url(#fd)"/></svg>
@@ -107,7 +148,7 @@ h1{font-family:"Fraunces",ui-serif,Georgia,serif;font-size:clamp(44px,min(7vw,12
   <svg style="left:90%;--d:36s;--dl:-8s;--dx:-30px;width:23px" viewBox="0 0 40 24"><use href="#leaf" fill="#b09268"/><use href="#leaf" fill="url(#fd)"/></svg>
 </div>
   <section class="copy">
-    <h1>Arborist</h1>
+    <h1 aria-label="Arborist"><span class="ch" aria-hidden="true" style="--c:0">A</span><span class="ch" aria-hidden="true" style="--c:1">r</span><span class="ch" aria-hidden="true" style="--c:2">b</span><span class="ch" aria-hidden="true" style="--c:3">o</span><span class="ch" aria-hidden="true" style="--c:4">r</span><span class="ch" aria-hidden="true" style="--c:5">i</span><span class="ch" aria-hidden="true" style="--c:6">s</span><span class="ch" aria-hidden="true" style="--c:7">t</span></h1>
     <p class="tag">Visualise your worktrees and sweep away the ones you don't need.</p>
     <a class="cta" href="https://github.com/faooful/arborist">
       <span class="ic"><svg width="20" height="20" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 .2a8 8 0 0 0-2.5 15.6c.4 0 .5-.2.5-.4v-1.5c-2.2.5-2.7-1-2.7-1-.4-.9-.9-1.2-.9-1.2-.7-.5.1-.5.1-.5.8.1 1.2.8 1.2.8.7 1.3 1.9.9 2.4.7 0-.5.3-.9.5-1.1-1.8-.2-3.6-.9-3.6-4 0-.9.3-1.6.8-2.1-.1-.2-.4-1 .1-2.1 0 0 .7-.2 2.2.8a7.5 7.5 0 0 1 4 0c1.5-1 2.2-.8 2.2-.8.4 1.1.2 1.9.1 2.1.5.6.8 1.3.8 2.1 0 3.1-1.9 3.8-3.7 4 .3.3.6.8.6 1.5v2.2c0 .2.1.5.6.4A8 8 0 0 0 8 .2"/></svg></span>
@@ -136,7 +177,13 @@ h1{font-family:"Fraunces",ui-serif,Georgia,serif;font-size:clamp(44px,min(7vw,12
 
 <script>
 // panel eases in from the icon once; resting state is open
-requestAnimationFrame(()=>document.body.classList.add('loaded'));
+requestAnimationFrame(()=>{const R=document.documentElement;window.__t0=performance.now();
+  if(!R.classList.contains('in')){document.body.classList.add('loaded');return}
+  // entrance: panel starts shut, then the real menu-bar icon click opens it at 1250ms
+  const pop=document.querySelector('.pop'),ic=document.querySelector('.icon');pop.classList.add('shut');ic.setAttribute('aria-expanded','false');
+  let touched=false;ic.addEventListener('click',e=>{if(e.isTrusted)touched=true},{capture:true});
+  R.classList.add('go');setTimeout(()=>{if(!touched&&pop.classList.contains('shut'))ic.click()},1250);
+  setTimeout(()=>R.classList.remove('in','go'),2400)});
 // Canopy scene, animated (v5.3): leaves sway on a slow wind field, re-dithered every frame at 1/2 res
 // (cell = 2 CSS px) with a screen-fixed 4x4 Bayer matrix to the H8 palette. ~15fps, paused when hidden
 // or offscreen; reduced motion = one static frame.
@@ -148,6 +195,10 @@ requestAnimationFrame(()=>document.body.classList.add('loaded'));
     for(let j=0;j<P.length;j++){const q=P[j],e=(R-q[0])**2*.3+(G-q[1])**2*.59+(Bb-q[2])**2*.11;if(e<bd){bd=e;bi=j}}LUT[r<<10|g<<5|b]=bi}
   let W,H,x,base,leaves,amp,im,run=false,vis=true,last=0,raf=0;
   window.__ft=[];
+  // v5.6 forest zoom-in: world-space scale of the leaf field 0.85 -> 1, 100..2500ms, cubic-bezier(.16,1,.3,1)
+  const ZOOM=document.documentElement.classList.contains('in'),Z0=.85,ZS=100,ZD=2400,ZCY=.44;
+  const bz=(p1x,p1y,p2x,p2y)=>u=>{let a=0,b=1,t=u;for(let i=0;i<20;i++){t=(a+b)/2;const xx=3*(1-t)*(1-t)*t*p1x+3*(1-t)*t*t*p2x+t*t*t;xx<u?a=t:b=t}return 3*(1-t)*(1-t)*t*p1y+3*(1-t)*t*t*p2y+t*t*t};
+  const ZE=bz(.16,1,.3,1),zoomK=()=>{if(!ZOOM||RM.matches)return 1;const u=(performance.now()-(window.__t0||0)-ZS)/ZD;return u>=1?1:u<=0?0:ZE(u)};
   function setup(){
     // backbuffer cap: cell = 2 CSS px up to the 1440x900 half-res budget (~728x458 px); on bigger screens the
     // cell grows in whole CSS px (integer S) so the backbuffer stays near that budget and the dither stays crisp.
@@ -169,7 +220,7 @@ requestAnimationFrame(()=>document.body.classList.add('loaded'));
     leaves=[];const n=Math.round(W*H/90);
     for(let i=0;i<n;i++){const px=rn()*W,py=rn()*H,f=field(px,py);if(f<.75)continue;
       leaves.push({px,py,sz:(9+rn()*13)*Math.min(1.5,.75+f*.3),a:rn()*6.283,c:cols[Math.floor(rn()*cols.length)],al:.75+rn()*.25,
-        k:Math.min(1,(f-.75)/.6)})} // k: sway strength, 0 at the clearing rim so the clearings stay calm
+        k:Math.min(1,(f-.75)/.6)});const L=leaves[leaves.length-1];L.dp=Math.min(1,Math.max(0,(L.sz-9)/20))} // k: sway strength, 0 at the clearing rim so the clearings stay calm
     amp=new Float32Array(W*H);for(let yy=0;yy<H;yy++)for(let xx=0;xx<W;xx++){const T=B[(yy&3)*4+(xx&3)]/16-.47;amp[yy*W+xx]=T*(8+26*Math.min(1,Math.max(0,(field(xx,yy)-.55)/.5)))}
     frame(0);
   }
@@ -178,10 +229,11 @@ requestAnimationFrame(()=>document.body.classList.add('loaded'));
   function frame(t){
     const t0=performance.now();
     x.globalAlpha=1;x.drawImage(base,0,0);
-    const DX=Math.sin(t*.07)*3,DY=Math.cos(t*.053)*2; // slow whole-canopy drift (~6 CSS px each way), pattern stays fixed
-    for(const l of leaves){const w=wind(l.px,l.py,t)*l.k,g2=wind(l.py,l.px,t*.8)*l.k;
-      x.setTransform(Math.cos(l.a+w*.16),Math.sin(l.a+w*.16),-Math.sin(l.a+w*.16),Math.cos(l.a+w*.16),l.px+w*1.6+DX*l.k,l.py+g2*1.1+DY*l.k);
-      const sz=l.sz;x.fillStyle=l.c;x.globalAlpha=l.al;x.beginPath();x.moveTo(-sz,0);x.quadraticCurveTo(0,-sz*.6,sz,0);x.quadraticCurveTo(0,sz*.6,-sz,0);x.fill();
+    const q=Math.min(1,Math.max(0,(performance.now()-(window.__t0||0)-1500)/600)),S=q*q*(3-2*q);const DX=Math.sin(t*.07)*3*S,DY=Math.cos(t*.053)*2*S; // slow whole-canopy drift (~6 CSS px each way), pattern stays fixed
+    const zk=zoomK(),zc=W/2,zy=H*ZCY;
+    for(const l of leaves){const zl=1-(1-Z0)*(1-zk)*(.8+.4*l.dp),lx=zc+(l.px-zc)*zl,ly=zy+(l.py-zy)*zl;const w=wind(l.px,l.py,t)*l.k*S,g2=wind(l.py,l.px,t*.8)*l.k*S;
+      x.setTransform(Math.cos(l.a+w*.16),Math.sin(l.a+w*.16),-Math.sin(l.a+w*.16),Math.cos(l.a+w*.16),lx+w*1.6+DX*l.k,ly+g2*1.1+DY*l.k);
+      const sz=l.sz*zl;x.fillStyle=l.c;x.globalAlpha=l.al;x.beginPath();x.moveTo(-sz,0);x.quadraticCurveTo(0,-sz*.6,sz,0);x.quadraticCurveTo(0,sz*.6,-sz,0);x.fill();
       x.strokeStyle='#f6f3ec';x.globalAlpha=.16;x.lineWidth=.6;x.beginPath();x.moveTo(-sz*.85,0);x.lineTo(sz*.85,0);x.stroke()}
     x.setTransform(1,0,0,1,0,0);x.globalAlpha=1;x.drawImage(base.glow,0,0);
     im=x.getImageData(0,0,W,H);const d=im.data,N=W*H;
@@ -190,7 +242,7 @@ requestAnimationFrame(()=>document.body.classList.add('loaded'));
     x.putImageData(im,0,0);
     __ft.push(performance.now()-t0);if(__ft.length>120)__ft.shift();
   }
-  function loop(now){raf=0;if(!run)return;if(now-last>=1000/FPS-2){last=now;frame(now/1000)}raf=requestAnimationFrame(loop)}
+  function loop(now){raf=0;if(!run)return;if(now-last>=1000/(zoomK()<1?30:FPS)-2){last=now;frame(now/1000)}raf=requestAnimationFrame(loop)}
   function update(){const go=!RM.matches&&vis&&!document.hidden&&!!x;if(go&&!run){run=true;raf||(raf=requestAnimationFrame(loop))}else if(!go){run=false}}
   new IntersectionObserver(e=>{vis=e[0].isIntersecting;update()}).observe(cv);
   document.addEventListener('visibilitychange',update);RM.addEventListener('change',()=>{update();if(RM.matches)frame(0)});
@@ -217,6 +269,7 @@ requestAnimationFrame(()=>document.body.classList.add('loaded'));
     const wt=T('76 worktrees'),wc=T('76 in 35 repos'),sl=[...svg.querySelectorAll('text')].find(e=>e.textContent==='Stale'&&e.getAttribute('font-size')==='10');
     const sv=sl&&[...svg.querySelectorAll('text')].find(e=>e.getAttribute('x')===sl.getAttribute('x')&&e.getAttribute('font-size')==='11.5'&&+e.getAttribute('y')>+sl.getAttribute('y'));
     Object.assign(svg,{wt,wc,sv,h,rd,rc,bar,bw:+bar.getAttribute('width')/(1-FREE0/TOTAL)});
+    [...svg.children].forEach(c=>{if(c.tagName==='defs'||c.tagName==='style'||c.querySelector('.lf'))return;try{const bb=c.getBBox();c.classList.add(bb.y<52?'pz-h':'pz-f')}catch(e){}});
     svg.querySelectorAll('.lf').forEach((g,i)=>{g.style.setProperty('--i',i);if(g.dataset.state==='stale')g.classList.add('sel')});
     if(anim&&!RM.matches){wrap.classList.add('enter');setTimeout(()=>wrap.classList.remove('enter'),1100)}
     sync(free);
