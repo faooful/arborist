@@ -221,3 +221,8 @@ Requested as "D27" by Cedric; D27/D27b and D28 were already taken, so it is logg
 - **Capture:** DEBUG `--motion-capture DIR` (ARBORIST_HOVER_SWEEP=1, cleanup disabled, manual spring clock) and
   `scripts/motion-capture.sh` write wind-moving/stopped/settled and blow-/fade- frames.
 - Math in `ArboristCore/Leaves/Wind.swift` (`Spring2D`, `Wind`, `BlowAway`). macOS UI unverified on Linux.
+
+## D30: The Remove confirm hugs its content (2026-11-04)
+
+The D27 confirm's row list was a bare `ScrollView` with `.frame(maxHeight: 240)`; a ScrollView is greedy, so even one row got the full 240 pt and the panel had a big empty middle. The list now takes its measured content height (Core estimate `ConfirmLayout.estimatedListHeight(rows:)` until measured), capped at `ConfirmLayout.listMaxHeight` (240) and scrolls only past the cap (`scrollDisabled` otherwise); the panel is `fixedSize(vertical)`. Overlay, dim layer, `perform(ConfirmAction)`, hidden Esc/Return buttons and plain `HoverButtonStyle` buttons are unchanged (D27/D27b). `--confirm-check` now reads the drawn panel frame and checks it is under `ConfirmLayout.heightBound(rows:)` for 1, 3 and 12 rows, and that a single row has no empty middle.
+
