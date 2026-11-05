@@ -100,11 +100,9 @@ struct PopoverView: View {
                         .frame(width: HeaderLayout.filterButton(hf.frames).w, height: 18, alignment: .leading)
                         .padding(EdgeInsets(top: hf.frames[2].rect.y, leading: hf.frames[2].rect.x, bottom: 0, trailing: 0))
                 }
-                Image(systemName: model.scanning ? "arrow.triangle.2.circlepath" : (model.resultIsCached ? "clock" : "checkmark.circle"))
-                    .font(.system(size: 12)).foregroundColor(Theme.ink2)
-                    .frame(width: HeaderLayout.statusSide, height: HeaderLayout.statusSide)
-                    .help(statusText.isEmpty ? "Up to date" : statusText)
-                    .accessibilityLabel(statusText.isEmpty ? "Up to date" : statusText)
+                // D33: the top-right glyph is the Refresh button (it used to be a bare status Image with no
+                // action). 24 pt hit area; spins while scanning; a click mid-scan queues one rescan.
+                RefreshButton(help: HeaderLayout.refreshHelp(status: statusText, scanning: model.scanning, queued: model.rescanQueued))
                     .padding(EdgeInsets(top: hf.frames[3].rect.y, leading: hf.frames[3].rect.x, bottom: 0, trailing: 0))
             }
             .frame(width: PopoverLayout.mapWidth, alignment: .topLeading)
@@ -250,9 +248,10 @@ struct PopoverView: View {
     /// D26: "34/35 repos" while scanning, "Cached · 34/35 repos" for a cached scan being refreshed, "Cached", or empty.
     /// D26: the header's texts and fixed frames.
     private var headerFrames: (count: String, sub: String, filter: String, frames: [(name: String, text: String, rect: Rect)]) {
-        let c = model.result.map(HeaderLayout.count) ?? "— worktrees", sub = model.result.map(HeaderLayout.sub) ?? ""
+        let c = model.result.map(HeaderLayout.count) ?? "— worktrees"
         let all = model.scanned?.repos ?? []
         let f = all.isEmpty ? "" : HeaderLayout.filterLabel(model.filter, repos: all)
+        let sub = model.result.map { HeaderLayout.sub($0, scanning: model.scanning, filter: f) } ?? ""
         return (c, sub, f, HeaderLayout.tightened(HeaderLayout.frames(count: c, sub: sub, filter: f), naturals: headerNaturals))
     }
 
@@ -596,6 +595,36 @@ extension StaleReason {
     }
 }
 
+/// D33: the header's Refresh button (top right).
+struct RefreshButton: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let help: String
+    @State private var spin = false
+
+    var body: some View {
+        Button { model.requestRescan() } label: {
+            Image(systemName: model.rescanQueued ? "arrow.clockwise.circle.fill" : "arrow.clockwise")
+                .font(.system(size: 12, weight: .medium))
+                .rotationEffect(.degrees(model.scanning && spin && !reduceMotion ? 360 : 0))
+                .animation(model.scanning && !reduceMotion ? .linear(duration: 1).repeatForever(autoreverses: false) : .default, value: spin)
+                .frame(width: HeaderLayout.statusSide, height: HeaderLayout.statusSide)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(HoverButtonStyle(kind: .icon, height: HeaderLayout.statusSide))
+        .frame(width: HeaderLayout.statusSide, height: HeaderLayout.statusSide)
+        .help(help)
+        .accessibilityLabel(model.scanning ? "Scanning; rescan when done" : "Rescan")
+        .background(GeometryReader { g in
+            let f = g.frame(in: .named(PopoverCoords.name))
+            Color.clear.onAppear { model.hover.drawnRefresh = Rect(x: f.minX, y: f.minY, w: f.width, h: f.height) }
+                .onChange(of: f) { f in model.hover.drawnRefresh = Rect(x: f.minX, y: f.minY, w: f.width, h: f.height) }
+        })
+        .onAppear { spin = model.scanning }
+        .onChange(of: model.scanning) { s in spin = s }
+    }
+}
+
 /// Header "All repos" button (D18): a small popover with All/None, a search field past 10 repos,
 /// and one checkbox per repo with its worktree count. Option-click a repo to show only that one.
 struct RepoFilterButton: View {
@@ -607,9 +636,13 @@ struct RepoFilterButton: View {
     var body: some View {
         Button { model.repoMenuOpen.toggle() } label: {
             HStack(spacing: 3) {
-                HeaderText(text: label, size: HeaderLayout.filterSize, color: Theme.ink2, frame: textFrame, alignment: .leading)
+                // D33: bottom-aligned in the same 18 pt text box as the stale text, so the baselines match.
+                HeaderText(text: label, size: HeaderLayout.filterSize, color: Theme.ink2,
+                           frame: Rect(x: 0, y: 0, w: textFrame.w, h: textFrame.h), alignment: .bottomLeading)
                 Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold)).foregroundColor(Theme.ink2)
+                    .frame(height: textFrame.h, alignment: .bottom).padding(.bottom, 3)
             }
+            .fixedSize()
         }
         .buttonStyle(HoverButtonStyle(kind: .link, height: 18))
         .accessibilityLabel("Repo filter: \(label)")

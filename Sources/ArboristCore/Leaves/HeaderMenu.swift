@@ -8,7 +8,10 @@ public enum HeaderLayout {
     public static let width = PopoverLayout.mapWidth, height = PopoverLayout.headerHeight
     public static let countSize = 22.0, subSize = 13.0, filterSize = 11.5
     /// Gaps between items, the filter button's chrome (padding + chevron), the status icon's side.
-    public static let gap = 6.0, filterChrome = 22.0, statusSide = 18.0
+    /// D33: the status slot is the Refresh button: a 24 pt square hit area, vertically centred on the row.
+    public static let gap = 6.0, filterChrome = 22.0, statusSide = 24.0
+    /// D33: the sub text and the filter share one text box, so their bottoms (and baselines) line up.
+    public static let textY = 6.0, textH = 18.0
     /// A single repo's name longer than this shows as "1 of N repos".
     public static let filterMaxText = 130.0
     /// Room for the app's real font: estimated widths × this.
@@ -16,6 +19,16 @@ public enum HeaderLayout {
 
     public static func count(_ r: ScanResult) -> String { let w = r.worktreeCount; return "\(w) worktree\(w == 1 ? "" : "s")" }
     public static func sub(_ r: ScanResult) -> String { r.totals.staleWorktrees > 0 ? "· \(r.totals.staleWorktrees) stale" : "" }
+    /// D33: while a scan is incomplete the counts are still climbing; say so after the stale text.
+    /// Falls back to a bare "…" after the stale text when the full "· scanning…" wouldn't fit the row.
+    public static func sub(_ r: ScanResult, scanning: Bool, filter: String) -> String {
+        let s = sub(r)
+        guard scanning else { return s }
+        let full = s.isEmpty ? "· " + scanningText : s + " · " + scanningText
+        if truncations(measures(count: count(r), sub: full, filter: filter)) == 0 { return full }
+        return s.isEmpty ? "· …" : s + "…"
+    }
+    public static let scanningText = "scanning…"
     /// The filter button's label (D26: carries the repo count, which left the headline).
     public static func filterLabel(selected: [String], total: Int) -> String {
         if selected.count == total { return "All \(total) repo\(total == 1 ? "" : "s")" }
@@ -34,9 +47,9 @@ public enum HeaderLayout {
     public static func frames(count c: String, sub s: String, filter f: String) -> [(name: String, text: String, rect: Rect)] {
         let cw = w(c, countSize), sw = w(s, subSize), fw = w(f, filterSize)
         let sx = cw + gap, fx = sx + sw + (s.isEmpty ? 0 : gap)
-        return [("count", c, Rect(x: 0, y: 0, w: cw, h: height)), ("sub", s, Rect(x: sx, y: 6, w: sw, h: 18)),
-                ("filter", f, Rect(x: fx, y: 4, w: fw, h: 18)),
-                ("status", "", Rect(x: width - statusSide, y: 4, w: statusSide, h: statusSide))]
+        return [("count", c, Rect(x: 0, y: 0, w: cw, h: height)), ("sub", s, Rect(x: sx, y: textY, w: sw, h: textH)),
+                ("filter", f, Rect(x: fx, y: textY, w: fw, h: textH)),
+                ("status", "", Rect(x: width - statusSide, y: ((height - statusSide) / 2).rounded(.down), w: statusSide, h: statusSide))]
     }
     /// D28: closes the gap the padded width estimate leaves after the count (and the stale text): with the
     /// drawn natural widths known, the following frames move left so each starts `gap` after the text
@@ -73,13 +86,24 @@ public enum HeaderLayout {
         let filters = [filterLabel(selected: Array(repeating: "r", count: 999), total: 999), filterLabel(selected: [], total: 999),
                        filterLabel(selected: Array(repeating: "r", count: 998), total: 999),
                        filterLabel(selected: [String(repeating: "W", count: 60)], total: 999), filterLabel(selected: ["mmmmmmmmmmmmmmmmm"], total: 999)]
-        return filters.flatMap { measures(count: "9999 worktrees", sub: "· 999 stale", filter: $0) }
+        return filters.flatMap { f in
+            ["· 999 stale", "· 999 stale…"].flatMap { measures(count: "9999 worktrees", sub: $0, filter: f) }
+        }
     }
     /// Truncated: needs more than its frame, or runs into the status icon.
     public static func truncations(_ m: [LegendMeasure], originX: Double = 0) -> Int {
         m.filter { $0.truncated(rowRight: originX + contentRight) }.count
     }
     /// D26: scan status in short form for the footer (and the icon's help): "Cached · 34/35", "34/35 repos".
+    /// D33: what a click on the Refresh button does: rescan now, or (mid-scan) queue one rescan for when it ends.
+    public enum RefreshClick: Equatable, Sendable { case rescan, queue, alreadyQueued }
+    public static func refreshClick(scanning: Bool, queued: Bool) -> RefreshClick {
+        scanning ? (queued ? .alreadyQueued : .queue) : .rescan
+    }
+    public static func refreshHelp(status: String, scanning: Bool, queued: Bool) -> String {
+        if scanning { return (status.isEmpty ? "Scanning" : "Scanning " + status) + (queued ? " · rescan queued" : " · click to rescan when done") }
+        return status.isEmpty ? "Rescan (up to date)" : "Rescan · " + status
+    }
     public static func status(progress: String?, cached: Bool) -> String {
         if let p = progress { return cached ? "Cached · \(p)" : p }
         return cached ? "Cached" : ""

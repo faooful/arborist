@@ -89,8 +89,8 @@ public enum LeafSVG {
         let a = at("count"), b = at("sub"), fb = at("filter"), st = at("status")
         s += "<text x=\"\(f(a.x))\" y=\"\(f(oy + 22))\" font-size=\"22\" font-weight=\"400\" fill=\"\(LeafPalette.ink)\">\(esc(c))</text>"
         if !sub.isEmpty { s += "<text x=\"\(f(b.x))\" y=\"\(f(oy + 22))\" font-size=\"13\" fill=\"\(LeafPalette.inkSoft)\">\(esc(sub))</text>" }
-        s += "<text x=\"\(f(fb.x + 4))\" y=\"\(f(oy + 21))\" font-size=\"11.5\" fill=\"\(LeafPalette.inkSoft)\">\(esc(filter)) ▾</text>"
-        s += "<circle cx=\"\(f(st.x + 9))\" cy=\"\(f(st.y + 9))\" r=\"6\" fill=\"none\" stroke=\"\(LeafPalette.inkSoft)\" stroke-width=\"1.2\"><title>\(esc(status.isEmpty ? "Arborist" : status))</title></circle>"
+        s += "<text x=\"\(f(fb.x + 4))\" y=\"\(f(oy + 22))\" font-size=\"11.5\" fill=\"\(LeafPalette.inkSoft)\">\(esc(filter)) ▾</text>"
+        s += "<circle cx=\"\(f(st.x + st.w / 2))\" cy=\"\(f(st.y + st.h / 2))\" r=\"6\" fill=\"none\" stroke=\"\(LeafPalette.inkSoft)\" stroke-width=\"1.2\"><title>\(esc(status.isEmpty ? "Arborist" : status))</title></circle>"
         let fbBox = HeaderLayout.filterButton(fr)
         let m = HeaderLayout.measures(count: c, sub: sub, filter: filter).map {
             LegendMeasure(label: $0.label, natural: $0.natural, frame: Rect(x: ox + $0.frame.x, y: oy + $0.frame.y, w: $0.frame.w, h: $0.frame.h))

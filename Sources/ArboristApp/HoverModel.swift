@@ -55,6 +55,8 @@ final class HoverModel: ObservableObject {
     var blocked = false
     /// D27: the confirm's Cancel/Remove frames and the footer frames, as drawn (popover coordinates).
     var drawnConfirmButtons: [(name: String, rect: Rect)]?
+    /// D33: the header Refresh button's drawn frame, for `--action-check`.
+    var drawnRefresh: Rect?
     /// D30: the confirm's drawn frame, for `--confirm-check`.
     var drawnConfirmPanel: Rect?
 

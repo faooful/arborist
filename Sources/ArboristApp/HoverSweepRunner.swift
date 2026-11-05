@@ -456,6 +456,21 @@ enum HoverSweepRunner {
         let r = router.perform(.rescan)
         log(r.log + " (scanning=\(model.scanning), progress=\(model.progressLabel ?? "none"))")
         log(router.perform(.rescan).log + " (second tap while scanning)")
+        // D33: the header Refresh button is drawn, ≥ 24 pt, and AppKit hit-tests it (nothing covers it); a
+        // click mid-scan queues one rescan.
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        var refreshOK = false
+        if let f = model.hover.drawnRefresh {
+            let y = bridgeHost.isFlipped ? f.y + f.h / 2 : bridgeHost.bounds.height - (f.y + f.h / 2)
+            let hit = bridgeHost.hitTest(NSPoint(x: f.x + f.w / 2, y: y))
+            refreshOK = f.w >= 24 && f.h >= 24 && hit != nil
+            log("refresh: frame \(f), hitTest → \(hit.map { String(describing: type(of: $0)) } ?? "nil")")
+        } else {
+            log("refresh: not drawn")
+        }
+        let click = model.requestRescan()
+        log("refresh: click while scanning=\(model.scanning) → \(click), queued=\(model.rescanQueued)")
+        log("refresh verdict: " + (refreshOK && (click == .rescan || model.rescanQueued) ? "OK" : "FAIL"))
 
         // D23: how this process was launched and who is frontmost. On macOS 14+ activation is cooperative: only
         // the active app can yield (NSApp.yieldActivation(to:) is called by the *yielding* app on itself), so a
