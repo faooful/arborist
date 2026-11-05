@@ -203,6 +203,7 @@ enum HoverSweepRunner {
         let cases: [(String, [CleanupItem])] = [
             ("single", [item("codex/native-hosting-resume", 0, .pruneOnly)]),
             ("clear 3", [item("a", 1_200_000_000, .remove), item("b", 300_000_000, .remove), item("c", 0, .pruneOnly)]),
+            ("clear 12", (0..<12).map { item("batch-\($0)", 100_000_000, $0 % 3 == 0 ? .pruneOnly : .remove) }),
         ]
         func point(_ r: Rect) -> NSPoint {
             let x = r.x + r.w / 2, y = r.y + r.h / 2
@@ -253,6 +254,14 @@ enum HoverSweepRunner {
                 confirmed.removeAll()
             }
             let buttons = open(items)
+            // D30: the confirm hugs its rows; only a long list hits the cap (and scrolls).
+            if let p = model.hover.drawnConfirmPanel {
+                let bound = ConfirmLayout.heightBound(rows: items.count)
+                check(p.h <= bound, "\(name): confirm height \(Int(p.h)) ≤ \(Int(bound)) for \(items.count) row(s)")
+                if items.count == 1 { check(p.h < ConfirmLayout.chromeHeight + ConfirmLayout.listMaxHeight / 2, "\(name): no empty middle (height \(Int(p.h)))") }
+            } else {
+                check(false, "\(name): confirm frame reported")
+            }
             check(buttons.count == 2, "\(name): Cancel and Remove drawn \(buttons.map { "\($0.name) \($0.rect)" })")
             let layers = HitOrder.popover(size: Pt(host.bounds.width, host.bounds.height), map: map, footer: footer, confirm: buttons)
             check(HitOrder.failures(layers, buttons: buttons).isEmpty, "\(name): hit order reaches both buttons")

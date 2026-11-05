@@ -5,6 +5,19 @@ import Foundation
 public enum ConfirmLayout {
     public static let width = PopoverLayout.mapWidth, padding = 16.0, buttonHeight = 24.0
     public static let cancelWidth = 72.0, removeWidth = 96.0, buttonGap = 8.0
+    /// D30: the row list hugs its content up to `listMaxHeight`, then scrolls. `rowHeight`/`rowSpacing` are the
+    /// estimate used before the list is measured (branch line + monospaced path line).
+    public static let listMaxHeight = 240.0, rowHeight = 30.0, rowSpacing = 6.0
+    /// Fixed chrome above and below the list: padding, title, two-line note, divider, buttons and spacing.
+    public static let chromeHeight = 2 * padding + 16 + 30 + 1 + buttonHeight + 3 * 10
+    public static func estimatedListHeight(rows: Int) -> Double {
+        rows <= 0 ? 0 : Double(rows) * rowHeight + Double(rows - 1) * rowSpacing
+    }
+    /// Height the list gets: its measured (or estimated) content height, capped; it scrolls past the cap.
+    public static func listHeight(content: Double) -> Double { min(max(content, 0), listMaxHeight) }
+    public static func scrolls(content: Double) -> Bool { content > listMaxHeight }
+    /// Upper bound on the whole confirm's height for `rows` rows (with slack for wrapping text), for checks.
+    public static func heightBound(rows: Int) -> Double { chromeHeight + listHeight(content: estimatedListHeight(rows: rows)) + 24 }
     /// The overlay sits above every other layer (map, panel, footer, repo menu).
     public static let zIndex = 100.0
 

@@ -242,6 +242,7 @@ struct PopoverView: View {
                 .onPreferenceChange(ConfirmButtonsKey.self) { f in
                     model.hover.drawnConfirmButtons = f.isEmpty ? nil : f.map { ($0.name, $0.rect) }
                 }
+                .onPreferenceChange(ConfirmPanelKey.self) { r in model.hover.drawnConfirmPanel = r }
             }
         }
     }
@@ -474,6 +475,16 @@ struct ConfirmButtonsKey: PreferenceKey {
 }
 
 /// Lists exactly what will be removed. D27: Esc cancels, Return removes (both buttons clickable).
+/// D30: the confirm's drawn frame and its list's content height.
+struct ConfirmPanelKey: PreferenceKey {
+    static let defaultValue: Rect? = nil
+    static func reduce(value: inout Rect?, nextValue: () -> Rect?) { value = nextValue() ?? value }
+}
+struct ConfirmListHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
 struct CleanupConfirmSheet: View {
     @EnvironmentObject var model: AppModel
     let items: [CleanupItem]
@@ -485,6 +496,9 @@ struct CleanupConfirmSheet: View {
         case .remove: model.confirmCleanup(items)
         }
     }
+
+    /// D30: measured height of the rows; starts at the Core estimate.
+    @State private var listContent: CGFloat?
 
     var body: some View {
         let summary = ConfirmWording.summary(bytes: items.map(\.bytes), pruneOnly: items.map { $0.kind == .pruneOnly })
@@ -509,8 +523,12 @@ struct CleanupConfirmSheet: View {
                         }
                     }
                 }
+                .background(GeometryReader { g in Color.clear.preference(key: ConfirmListHeightKey.self, value: g.size.height) })
             }
-            .frame(maxHeight: 240)
+            // D30: hug the rows (no greedy ScrollView); scroll only past the cap.
+            .frame(height: ConfirmLayout.listHeight(content: Double(listContent ?? ConfirmLayout.estimatedListHeight(rows: items.count))))
+            .scrollDisabled(!ConfirmLayout.scrolls(content: Double(listContent ?? ConfirmLayout.estimatedListHeight(rows: items.count))))
+            .onPreferenceChange(ConfirmListHeightKey.self) { h in if h > 0 { listContent = h } }
             Divider()
             HStack {
                 Text(summary).font(.system(size: 11.5, weight: .medium)).fixedSize(horizontal: false, vertical: true)
@@ -530,6 +548,11 @@ struct CleanupConfirmSheet: View {
         }
         .padding(ConfirmLayout.padding)
         .frame(width: ConfirmLayout.width)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(GeometryReader { g in
+            let f = g.frame(in: .named(PopoverCoords.name))
+            Color.clear.preference(key: ConfirmPanelKey.self, value: Rect(x: f.minX, y: f.minY, w: f.width, h: f.height))
+        })
         .background {
             // D27b: the keys, bound apart from the clickable buttons.
             Button("") { perform(ConfirmInput.escape.action) }.keyboardShortcut(.cancelAction)
