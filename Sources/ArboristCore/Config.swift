@@ -16,6 +16,12 @@ public struct ArboristConfig: Codable, Equatable, Sendable {
     public static var defaults: ArboristConfig {
         ArboristConfig(roots: ["~", "~/go", "/tmp"], lowSpaceThresholdGB: 20, maxDepth: 8)
     }
+    /// Help-text summary of the defaults, built from `defaults` so it can't drift: "default roots: ~, ~/go and /tmp; depth 8".
+    public static var defaultsSummary: String {
+        let r = defaults.roots
+        let roots = r.count > 1 ? r.dropLast().joined(separator: ", ") + " and " + r.last! : r.joined()
+        return "default roots: \(roots); depth \(defaults.maxDepth)"
+    }
     /// D32: earlier defaults (roots, maxDepth). A saved config still equal to one of these is migrated to the
     /// current defaults; anything the user changed is left alone. Idempotent: the new default isn't listed.
     public static let legacyDefaults: [(roots: [String], maxDepth: Int)] = [

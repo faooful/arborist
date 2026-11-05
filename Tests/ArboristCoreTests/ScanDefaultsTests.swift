@@ -54,4 +54,8 @@ final class ScanDefaultsTests: XCTestCase, @unchecked Sendable {
         XCTAssertTrue(Scanner(config: ArboristConfig(roots: [home], lowSpaceThresholdGB: 1, maxDepth: 4), prLookup: nil).scan().repos.isEmpty)
         XCTAssertEqual(Scanner(config: ArboristConfig(roots: [home, go], lowSpaceThresholdGB: 1, maxDepth: 4), prLookup: nil).scan().repos.count, 1)
     }
+
+    func testHelpSummaryFollowsDefaults() {
+        XCTAssertEqual(ArboristConfig.defaultsSummary, "default roots: ~, ~/go and /tmp; depth 8")
+    }
 }
