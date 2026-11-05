@@ -27,8 +27,8 @@ final class WorktreeParsingTests: XCTestCase, @unchecked Sendable {
 
 final class WorktreeLabelAndListTests: XCTestCase, @unchecked Sendable {
     func testLabelIsBranchThenRepo() {
-        XCTAssertEqual(WorktreeLabel.text(branch: "feat-t5b-handover", head: nil, repo: "property-management"), "feat-t5b-handover · property-management")
-        XCTAssertEqual(WorktreeLabel.text(branch: nil, head: "abc1234def", repo: "farm"), "detached @abc1234 · farm")
+        XCTAssertEqual(WorktreeLabel.text(branch: "acorn-ui", head: nil, repo: "orchard"), "acorn-ui · orchard")
+        XCTAssertEqual(WorktreeLabel.text(branch: nil, head: "abc1234def", repo: "rowan"), "detached @abc1234 · rowan")
     }
 
     func testHeadline() {
@@ -48,9 +48,9 @@ final class WorktreeLabelAndListTests: XCTestCase, @unchecked Sendable {
     }
 
     func testHoverCard() throws {
-        let ref = try XCTUnwrap(WorktreeList.sorted(LeafSample.scan).first { $0.worktree.branch == "feat-t5b-handover" })
+        let ref = try XCTUnwrap(WorktreeList.sorted(LeafSample.scan).first { $0.worktree.branch == "acorn-ui" })
         let c = HoverCard(ref, now: LeafSample.now, home: LeafSample.home)
-        XCTAssertEqual(c.branch, "feat-t5b-handover")
+        XCTAssertEqual(c.branch, "acorn-ui")
         XCTAssertEqual(c.pill, "Uncommitted")
         XCTAssertTrue(c.path.hasPrefix("~/"))
         XCTAssertLessThanOrEqual(c.path.count, HoverCard.pathChars)
