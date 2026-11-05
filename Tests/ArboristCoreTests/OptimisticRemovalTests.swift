@@ -38,6 +38,20 @@ final class OptimisticRemovalTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(c.confirmed.count, 1); XCTAssertEqual(c.restored, []); XCTAssertNil(WorktreeList.find(c.result, path: t.worktree))
     }
 
+    /// Mac: /tmp and /var/folders are symlinks into /private, and git records the resolved path, so the
+    /// trial worktree must still be found (and ready) by the path it was created at.
+    func testSymlinkedPathFindsReadyWorktree() throws {
+        let real = base + "-real", link = base + "-link"
+        try FileManager.default.createDirectory(atPath: real, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: real)
+        defer { try? FileManager.default.removeItem(atPath: link); try? FileManager.default.removeItem(atPath: real) }
+        let t = try XCTUnwrap(TrialRepo.make(in: link))
+        let r = Scanner(config: ArboristConfig(roots: [link], lowSpaceThresholdGB: 1, maxDepth: 3)).scan()
+        let ref = try XCTUnwrap(WorktreeList.find(r, path: t.worktree), "found via the symlinked path; listed: \(r.repos.flatMap(\.worktrees).map(\.path))")
+        XCTAssertNil(Cleanup.blocker(ref.worktree), "\(String(describing: Cleanup.blocker(ref.worktree)))")
+        XCTAssertNotNil(Cleanup.item(ref))
+    }
+
     func testRollbackWhenGitStillListsIt() throws {
         let t = try XCTUnwrap(TrialRepo.make(in: base))
         let r0 = scan()
