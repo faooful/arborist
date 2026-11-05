@@ -32,6 +32,8 @@ public enum CleanupOutcome: Equatable, Sendable {
     public var item: CleanupItem {
         switch self { case .removed(let i), .pruned(let i), .skipped(let i, _), .failed(let i, _): i }
     }
+    /// D28: git removed (or pruned) it, so it leaves the model now.
+    public var succeeded: Bool { if case .removed = self { return true }; if case .pruned = self { return true }; return false }
     public var freed: Int64 { if case .removed(let i) = self { return i.bytes }; return 0 }
     public var summary: String {
         switch self {

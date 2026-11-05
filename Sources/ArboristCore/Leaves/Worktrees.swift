@@ -35,10 +35,15 @@ public enum WorktreeList {
         }
     }
 
+    /// Exact match first; otherwise by resolved path, because git records worktrees by their real path
+    /// (on macOS /tmp and /var/folders are symlinks into /private).
     public static func find(_ r: ScanResult, path: String) -> WorktreeRef? {
         for repo in r.repos { if let w = repo.worktrees.first(where: { $0.path == path }) { return WorktreeRef(worktree: w, repo: repo.name, repoPath: repo.path) } }
+        let want = resolved(path)
+        for repo in r.repos { if let w = repo.worktrees.first(where: { resolved($0.path) == want }) { return WorktreeRef(worktree: w, repo: repo.name, repoPath: repo.path) } }
         return nil
     }
+    static func resolved(_ p: String) -> String { URL(fileURLWithPath: p).resolvingSymlinksInPath().standardizedFileURL.path }
 }
 
 /// The hover card (D13): a header (branch, state pill, repo, path), a 2×2 stats grid, the commit

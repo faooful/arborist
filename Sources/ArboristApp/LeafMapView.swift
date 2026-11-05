@@ -33,6 +33,9 @@ struct LeafMapView: View {
                 .background(MouseTracking(onMove: { p in hover.pointer(view: p, in: map) }, onExit: { hover.exit() }))
                 .contentShape(Rectangle())
                 .onTapGesture(coordinateSpace: .local) { p in hover.click(view: p, in: map) }
+                .overlay(alignment: .topLeading) {
+                    if let gh = model.exitGhost { ExitGhostView(ghost: gh).id(gh.id) }
+                }
                 .onAppear { hover.transform = t }
                 .onChange(of: t) { nt in hover.transform = nt }
             }
@@ -73,6 +76,23 @@ struct LeafMapView: View {
             }
         }
         .animation(reduceMotion || hover.instant ? nil : .easeInOut(duration: HoverTracker.duration(reduceMotion: false)), value: ringed)
+    }
+}
+
+/// D28: a 0.2 s exit for removed leaves: fade and shrink slightly, drawn with the transform they had.
+struct ExitGhostView: View {
+    let ghost: ExitGhost
+    @State private var gone = false
+    var body: some View {
+        LeafCanvas(map: ghost.map, only: ghost.ids)
+            .scaleEffect(gone ? 0.92 : 1)
+            .opacity(gone ? 0 : 1)
+            .frame(width: ghost.map.width, height: ghost.map.height, alignment: .topLeading)
+            .scaleEffect(ghost.transform.scale, anchor: .topLeading)
+            .offset(x: ghost.transform.dx, y: ghost.transform.dy)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+            .onAppear { withAnimation(.easeOut(duration: ExitGhost.duration)) { gone = true } }
     }
 }
 
