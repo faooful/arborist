@@ -14,8 +14,14 @@ public struct ArboristConfig: Codable, Equatable, Sendable {
 
     public static var home: String { FileManager.default.homeDirectoryForCurrentUser.path }
     public static var defaults: ArboristConfig {
-        ArboristConfig(roots: ["~", "/tmp"], lowSpaceThresholdGB: 20, maxDepth: 4)
+        ArboristConfig(roots: ["~", "~/go", "/tmp"], lowSpaceThresholdGB: 20, maxDepth: 8)
     }
+    /// D32: earlier defaults (roots, maxDepth). A saved config still equal to one of these is migrated to the
+    /// current defaults; anything the user changed is left alone. Idempotent: the new default isn't listed.
+    public static let legacyDefaults: [(roots: [String], maxDepth: Int)] = [
+        (["~", "~/Documents"], 4), // v1 (D12)
+        (["~", "/tmp"], 4),        // D12–D31
+    ]
     public init(roots: [String], lowSpaceThresholdGB: Double, maxDepth: Int,
                 leafStages: StageMultipliers = .default, showFreeText: Bool = true, scanTimeoutSeconds: Double = 180) {
         self.roots = roots; self.lowSpaceThresholdGB = lowSpaceThresholdGB; self.maxDepth = maxDepth
@@ -28,10 +34,15 @@ public struct ArboristConfig: Codable, Equatable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = Self.defaults
         roots = try c.decodeIfPresent([String].self, forKey: .roots) ?? d.roots
-        // The v1 default only covered ~ and ~/Documents; treat it as "default" so saved configs pick up /tmp (D12).
-        if roots == ["~", "~/Documents"] { roots = d.roots }
         lowSpaceThresholdGB = try c.decodeIfPresent(Double.self, forKey: .lowSpaceThresholdGB) ?? d.lowSpaceThresholdGB
-        maxDepth = try c.decodeIfPresent(Int.self, forKey: .maxDepth) ?? d.maxDepth
+        let savedDepth = try c.decodeIfPresent(Int.self, forKey: .maxDepth)
+        maxDepth = savedDepth ?? d.maxDepth
+        // D12/D32: a saved config still on an old default (roots and depth; a missing depth counts as the old
+        // default 4) moves to the current default roots and depth. A customised one is left untouched.
+        let saved = (roots: roots, depth: savedDepth ?? 4)
+        if Self.legacyDefaults.contains(where: { $0.roots == saved.roots && $0.maxDepth == saved.depth }) {
+            roots = d.roots; maxDepth = d.maxDepth
+        }
         leafStages = try c.decodeIfPresent(StageMultipliers.self, forKey: .leafStages) ?? d.leafStages
         showFreeText = try c.decodeIfPresent(Bool.self, forKey: .showFreeText) ?? d.showFreeText
         scanTimeoutSeconds = try c.decodeIfPresent(Double.self, forKey: .scanTimeoutSeconds) ?? d.scanTimeoutSeconds
