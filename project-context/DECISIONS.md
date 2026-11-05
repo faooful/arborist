@@ -222,6 +222,10 @@ Requested as "D27" by Cedric; D27/D27b and D28 were already taken, so it is logg
   `scripts/motion-capture.sh` write wind-moving/stopped/settled and blow-/fade- frames.
 - Math in `ArboristCore/Leaves/Wind.swift` (`Spring2D`, `Wind`, `BlowAway`). macOS UI unverified on Linux.
 
+## D30: The Remove confirm hugs its content (2026-11-04)
+
+The D27 confirm's row list was a bare `ScrollView` with `.frame(maxHeight: 240)`; a ScrollView is greedy, so even one row got the full 240 pt and the panel had a big empty middle. The list now takes its measured content height (Core estimate `ConfirmLayout.estimatedListHeight(rows:)` until measured), capped at `ConfirmLayout.listMaxHeight` (240) and scrolls only past the cap (`scrollDisabled` otherwise); the panel is `fixedSize(vertical)`. Overlay, dim layer, `perform(ConfirmAction)`, hidden Esc/Return buttons and plain `HoverButtonStyle` buttons are unchanged (D27/D27b). `--confirm-check` now reads the drawn panel frame and checks it is under `ConfirmLayout.heightBound(rows:)` for 1, 3 and 12 rows, and that a single row has no empty middle.
+
 ## D31: Squash- and rebase-merged branches are Clear-ready (2026-11-04)
 
 GitHub squash and rebase merges leave the branch tip outside `origin/<default>`'s ancestry, so `for-each-ref --merged` never matched them and they stayed "Not merged" unless the remote branch was deleted *and* pruned locally. New `StaleReason.squashMerged` (`SquashMerge.detect`), tried only for a clean, not-ahead, non-default branch with its own commits that isn't already ancestry-merged:

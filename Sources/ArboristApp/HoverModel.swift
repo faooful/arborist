@@ -55,6 +55,8 @@ final class HoverModel: ObservableObject {
     var blocked = false
     /// D27: the confirm's Cancel/Remove frames and the footer frames, as drawn (popover coordinates).
     var drawnConfirmButtons: [(name: String, rect: Rect)]?
+    /// D30: the confirm's drawn frame, for `--confirm-check`.
+    var drawnConfirmPanel: Rect?
 
     /// D29: the breeze. `windActive` turns the map's TimelineView on; it goes off once the spring settles.
     let wind = WindEngine()
