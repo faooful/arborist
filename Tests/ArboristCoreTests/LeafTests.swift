@@ -41,15 +41,15 @@ final class LeafLayoutTests: XCTestCase, @unchecked Sendable {
                 XCTAssertTrue(l.inner.isEmpty)
             }
         }
-        let handover = m.leaves.first { $0.item.name == "feat-t5b-handover" }!
-        XCTAssertEqual(handover.item.rebuildableShare, 0.9, accuracy: 0.001, "5.6 of 6.2 GB, clamped so a rim of source always shows")
+        let acorn = m.leaves.first { $0.item.name == "acorn-ui" }!
+        XCTAssertEqual(acorn.item.rebuildableShare, 0.9, accuracy: 0.001, "5.6 of 6.2 GB, clamped so a rim of source always shows")
     }
 
     func testAreasGrowWithSizeButSmallWorktreesStayVisible() {
         let m = LeafLayout.layout(LeafSample.groups)
-        let farmMain = m.leaves.first { $0.group == "farm" && $0.item.kind == .main }!    // 12.5 GB
-        let spike = m.leaves.first { $0.item.name == "spike-ledger" }!                   // 0.1 GB
-        XCTAssertGreaterThan(Geo.area(farmMain.outline), Geo.area(spike.outline) * 1.5)
+        let rowanMain = m.leaves.first { $0.group == "rowan" && $0.item.kind == .main }!    // 12.5 GB
+        let bark = m.leaves.first { $0.item.name == "bark-tests" }!                     // 0.1 GB
+        XCTAssertGreaterThan(Geo.area(rowanMain.outline), Geo.area(bark.outline) * 1.5)
         XCTAssertGreaterThan(LeafLayout.weight(bytes: 0), 0)
         XCTAssertLessThan(LeafLayout.weight(bytes: 20_000_000_000) / LeafLayout.weight(bytes: 50_000_000), 10)
     }

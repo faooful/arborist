@@ -7,7 +7,7 @@ public enum LeafSample {
     public static let now = Date(timeIntervalSince1970: 1_793_700_000)   // fixed "now" for renders
     public static let freeBytes = gb(118)
     public static let totalBytes = gb(1000)
-    static let home = "/Users/joseph"
+    static let home = "/Users/sample"
 
     enum S { case dirty(Int), unpushed(Int), merged, gone, clean }
 
@@ -32,30 +32,30 @@ public enum LeafSample {
     }
 
     public static var scan: ScanResult {
-        let pm = "property-management", farm = "farm", arb = "arborist"
+        let orchard = "orchard", rowan = "rowan", arb = "arborist"
         let repos = [
-            Repo(name: pm, path: "\(home)/code/\(pm)", defaultBranch: "main", worktrees: [
-                wt(pm, "main", main: true, src: 2.1, deps: 7.3, .clean, days: 1, "Merge pull request #212"),
-                wt(pm, "feat-t5b-handover", src: 0.6, deps: 5.6, .dirty(4), days: 0.2, "Handover form: tenant step"),
-                wt(pm, "qa1103-forms", src: 0.5, deps: 4.3, .unpushed(2), days: 2, "QA fixes for 11/03"),
-                wt(pm, "fix-inventory-overlap", src: 0.4, deps: 3.5, .merged, days: 19, "Fix inventory overlap"),
-                wt(pm, "spike-ledger", src: 0.1, deps: 0, .gone, days: 41, "Ledger spike"),
+            Repo(name: orchard, path: "\(home)/code/\(orchard)", defaultBranch: "main", worktrees: [
+                wt(orchard, "main", main: true, src: 2.1, deps: 7.3, .clean, days: 1, "Merge pull request #212"),
+                wt(orchard, "acorn-ui", src: 0.6, deps: 5.6, .dirty(4), days: 0.2, "Shade the canopy edge"),
+                wt(orchard, "dew-retry", src: 0.5, deps: 4.3, .unpushed(2), days: 2, "Dew line fixes"),
+                wt(orchard, "twig-layout", src: 0.4, deps: 3.5, .merged, days: 19, "Fix twig overlap"),
+                wt(orchard, "bark-tests", src: 0.1, deps: 0, .gone, days: 41, "Bark tests"),
             ]),
-            Repo(name: farm, path: "\(home)/code/\(farm)", defaultBranch: "main", worktrees: [
-                wt(farm, "main", main: true, src: 3.4, deps: 9.1, .clean, days: 3, "Bump engine"),
-                wt(farm, "expedition-roam", src: 1.2, deps: 6.0, .dirty(11), days: 0.5, "Roaming camera"),
-                wt(farm, "r8/oil", src: 0.9, deps: 4.5, .merged, days: 26, "Oil shader"),
-                wt(farm, "r7/terrain", src: 0.8, deps: 3.3, .merged, days: 33, "Terrain LOD"),
+            Repo(name: rowan, path: "\(home)/code/\(rowan)", defaultBranch: "main", worktrees: [
+                wt(rowan, "main", main: true, src: 3.4, deps: 9.1, .clean, days: 3, "Bump the canopy"),
+                wt(rowan, "canopy-walk", src: 1.2, deps: 6.0, .dirty(11), days: 0.5, "Walking the canopy"),
+                wt(rowan, "r8/sap", src: 0.9, deps: 4.5, .merged, days: 26, "Sap veins"),
+                wt(rowan, "r7/moss", src: 0.8, deps: 3.3, .merged, days: 33, "Moss cover"),
             ]),
             Repo(name: arb, path: "\(home)/code/\(arb)", defaultBranch: "main", worktrees: [
                 wt(arb, "main", main: true, src: 0.3, deps: 1.9, .clean, days: 0.1, "Progressive scan (D11)"),
                 wt(arb, "worktree-first", src: 0.2, deps: 1.4, .dirty(9), days: 0.05, "Worktree-first map", at: "/private/tmp/arborist-worktree-first"),
             ]),
-            Repo(name: "drift", path: "\(home)/code/drift", defaultBranch: "main", worktrees: [
-                wt("drift", "main", main: true, src: 1.6, deps: 3.6, .unpushed(1), days: 6, "Tide tables"),
+            Repo(name: "nettle", path: "\(home)/code/nettle", defaultBranch: "main", worktrees: [
+                wt("nettle", "main", main: true, src: 1.6, deps: 3.6, .unpushed(1), days: 6, "Stem tables"),
             ]),
-            Repo(name: "notes", path: "\(home)/Documents/notes", defaultBranch: "main", worktrees: [
-                wt("notes", "main", main: true, src: 0.05, deps: 0, .clean, days: 90, "Weekly notes"),
+            Repo(name: "teasel", path: "\(home)/Documents/teasel", defaultBranch: "main", worktrees: [
+                wt("teasel", "main", main: true, src: 0.05, deps: 0, .clean, days: 90, "Weekly notes"),
             ]),
         ]
         return ScanResult(scannedAt: now, roots: ["~", "/tmp"], volume: VolumeInfo(path: home, freeBytes: freeBytes, totalBytes: totalBytes),
@@ -67,23 +67,23 @@ public enum LeafSample {
 }
 
 extension LeafSample {
-    /// A busy machine like Joseph's (76 worktrees in 35 repos, long repo names, 0 B prunable /tmp
-    /// worktrees), for the declutter snapshots and label-collision tests (D13). Deterministic.
+    /// A busy machine (76 worktrees in 35 repos, 0 B prunable /tmp worktrees), for the declutter
+    /// snapshots and label-collision tests (D13). Names match the landing-page demo. Deterministic.
     public static var busy: ScanResult {
-        let names = ["property-management", "letta-code", "figma-find", "lexicon", "dogpark", "Storyboard.md", "temper-experiment",
-                     "mockingbird", "canvas-terminal-spike", "test2", "drift", "outputs.space", "Outpost", "product-design", "Recap",
-                     "etch", "sign-sealed", "plan-viewer", "arborist", "farm", "notes", "ledger", "atlas-ui", "kiln", "quarry",
-                     "harbor", "fennel", "orchard", "beacon", "sprout", "relay", "thistle", "pebble", "marrow", "lumen"]
+        let names = ["orchard", "lantern", "tidepool", "quill", "willow-kit", "bramble", "sundial", "copperleaf", "heron-notes",
+                     "hollyhock", "fernhill", "foxglove", "tansy", "nettle", "inkwell", "larkspur", "wicker", "saltmarsh",
+                     "clover", "burrow", "acorn-cli", "meadowlark", "juniper", "cobble-ui", "mistral-docs", "sedge", "bracken",
+                     "hazel", "birchwood", "yarrow", "teasel", "rowan", "sorrel", "mallow", "alder"]
         let counts = [6, 5, 4, 4, 3, 3, 3, 3, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
-        let branches = ["feat-t5b-handover", "qa1103-forms", "pr-7430", "fix-overlap", "spike-ledger", "expedition-roam", "r8/oil",
-                        "copy-tweaks", "onboarding-v2", "perf-pass", "hover-fade", "release-1.4", "deps-bump", "docs"]
+        let branches = ["fern-sync", "moss-cache", "dew-retry", "old-canopy", "twig-layout", "bark-tests", "acorn-ui",
+                        "root-scan", "leaf-hover", "pollen-fix", "sprig-docs", "seedling", "grove-api", "thicket"]
         var seed: UInt64 = 7
         func rnd() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) }
         var repos: [Repo] = [], k = 0
         for (i, name) in names.enumerated() {
             var wts = [wt(name, i % 5 == 0 ? "master" : "main", main: true, src: 0.05 + rnd() * (i == 7 ? 4 : 0.9),
                           deps: i == 7 ? 14.8 : rnd() * 1.2, rnd() < 0.35 ? .dirty(Int(rnd() * 9) + 1) : .clean, days: rnd() * 20,
-                          i == 7 ? "fix(wasm): preserve hot-update chunks when the dev server restarts after a config change" : "Merge main")]
+                          i == 7 ? "fix(canopy): keep the shaded leaves when the grove redraws after a long wind change" : "Merge main")]
             for j in 1..<counts[i] {
                 k += 1
                 let b = branches[k % branches.count] + (k >= branches.count ? "-\(k / branches.count + 1)" : "")
