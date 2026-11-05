@@ -15,7 +15,7 @@
 - Read-only CLI; app can remove safe worktrees after confirm (D14, approved by Joseph). Removal code lives only in the `ArboristCleanup` module, which the CLI doesn't link. Removals happen only from a UI click plus a confirm sheet. Anything beyond D14 (force, branch deletion, caches) needs Cedric/Joseph sign-off.
 - No Full Disk Access. Unreadable paths are skipped and counted.
 - Visuals: plain for now; Dara is redesigning the popover. Earlier direction was Kanso-style.
-- Commits authored and committed as Joseph Korol <joseph.m.korol@gmail.com>. Feature branches and PRs only.
+- Commits authored and committed as Joseph Korol. Feature branches and PRs only.
 
 ## PRs
 - #1 `v1-scanner-cli-app`: scanner, `arborist` CLI with JSON, menu bar popover app (D1–D8).

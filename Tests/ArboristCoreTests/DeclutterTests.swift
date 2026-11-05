@@ -17,10 +17,10 @@ final class DeclutterLayoutTests: XCTestCase, @unchecked Sendable {
     }
 
     func testPlaceLabelsDropsTheLoserOfACollision() {
-        let a = GroupLabel(name: "figma-find", at: Pt(100, 10)), b = GroupLabel(name: "lexicon", at: Pt(130, 10))
-        let edge = GroupLabel(name: "outputs.space", at: Pt(2, 10))
+        let a = GroupLabel(name: "meadowlark", at: Pt(100, 10)), b = GroupLabel(name: "lantern", at: Pt(130, 10))
+        let edge = GroupLabel(name: "willow-kit", at: Pt(2, 10))
         let kept = LeafLayout.placeLabels([(1, b), (5, a), (9, edge)], width: 448, height: 400)
-        XCTAssertEqual(kept.map(\.name), ["figma-find"], "bigger group wins, the label off the edge is dropped")
+        XCTAssertEqual(kept.map(\.name), ["meadowlark"], "bigger group wins, the label off the edge is dropped")
     }
 
     func testLeafTextIsBranchOnlyAndFitsAt10_5() {
@@ -42,7 +42,7 @@ final class DeclutterLayoutTests: XCTestCase, @unchecked Sendable {
     func testTextFitMeasure() {
         let square = [Pt(0, 0), Pt(60, 0), Pt(60, 40), Pt(0, 40)]
         XCTAssertTrue(LeafText.fits("main", in: square, at: Pt(30, 20)))
-        XCTAssertFalse(LeafText.fits("feat-t5b-handover", in: square, at: Pt(30, 20)))
+        XCTAssertFalse(LeafText.fits("seedling-canopy", in: square, at: Pt(30, 20)))
         XCTAssertGreaterThan(LeafText.width("mmmm", size: 10.5), LeafText.width("iiii", size: 10.5))
     }
 
@@ -96,10 +96,10 @@ final class HoverTrackerTests: XCTestCase, @unchecked Sendable {
 
 final class HoverCardFormatTests: XCTestCase, @unchecked Sendable {
     func testMiddleAbbreviation() {
-        let p = "~/conductor/workspaces/property-management/feat-t5b-handover"
+        let p = "~/conductor/workspaces/willow-kit/seedling-canopy"
         let m = Format.middle(p, max: 38)
         XCTAssertLessThanOrEqual(m.count, 38)
-        XCTAssertTrue(m.hasPrefix("~/conductor/")); XCTAssertTrue(m.hasSuffix("/feat-t5b-handover")); XCTAssertTrue(m.contains("…"))
+        XCTAssertTrue(m.hasPrefix("~/conductor/")); XCTAssertTrue(m.hasSuffix("/seedling-canopy")); XCTAssertTrue(m.contains("…"))
         XCTAssertEqual(Format.middle("~/code/app", max: 38), "~/code/app")
         let noSlash = Format.middle(String(repeating: "x", count: 60), max: 20)
         XCTAssertEqual(noSlash.count, 20)
@@ -119,7 +119,7 @@ final class HoverCardFormatTests: XCTestCase, @unchecked Sendable {
     }
 
     func testWordBoundaryWrap() {
-        let msg = "fix(wasm): preserve hot-update chunks when the dev server restarts after a config change"
+        let msg = "fix(canopy): keep the shaded leaves when the grove redraws after a long wind change"
         let l = Format.wrap(msg, width: 40, maxLines: 2)
         XCTAssertEqual(l.count, 2)
         XCTAssertTrue(l.allSatisfy { $0.count <= 40 })

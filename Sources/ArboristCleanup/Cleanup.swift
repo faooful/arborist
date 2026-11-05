@@ -153,7 +153,7 @@ public struct Git: Sendable {
 }
 
 /// ~/.config/arborist/cleanup.log gets one tab-separated line per removed or pruned worktree:
-/// `2026-11-03T09:40:00-05:00	removed	1234567	mockingbird	feat-x	/Users/joseph/wt/feat-x`
+/// `2026-11-03T09:40:00-05:00	removed	1234567	orchard	acorn-ui	/Users/sample/wt/acorn-ui`
 public enum CleanupLog {
     public static var url: URL {
         URL(fileURLWithPath: ArboristConfig.home).appendingPathComponent(".config/arborist/cleanup.log")

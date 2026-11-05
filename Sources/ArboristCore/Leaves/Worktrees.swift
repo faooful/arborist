@@ -2,7 +2,7 @@ import Foundation
 
 /// Worktree-first presentation shared by the app, the SVG renderer and the tests (D12).
 public enum WorktreeLabel {
-    /// "feat-t5b-handover · property-management". A detached HEAD shows its short hash.
+    /// "acorn-ui · orchard". A detached HEAD shows its short hash.
     public static func text(branch: String?, head: String? = nil, repo: String) -> String {
         "\(branchName(branch, head: head)) · \(repo)"
     }
@@ -156,7 +156,7 @@ extension Format {
         }
     }
 
-    /// `/Users/joseph/code/x` -> `~/code/x`.
+    /// `/Users/sample/code/x` -> `~/code/x`.
     public static func shortPath(_ p: String, home: String = ArboristConfig.home) -> String {
         p == home ? "~" : (p.hasPrefix(home + "/") ? "~" + p.dropFirst(home.count) : p)
     }
