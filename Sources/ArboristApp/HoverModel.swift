@@ -56,9 +56,18 @@ final class HoverModel: ObservableObject {
     /// D27: the confirm's Cancel/Remove frames and the footer frames, as drawn (popover coordinates).
     var drawnConfirmButtons: [(name: String, rect: Rect)]?
 
+    /// D29: the breeze. `windActive` turns the map's TimelineView on; it goes off once the spring settles.
+    let wind = WindEngine()
+    @Published private(set) var windActive = false
+    func windSettled() { if windActive && wind.spring.settled { windActive = false } }
+
     func pointer(view p: CGPoint, in map: LeafMap, at t: Double? = nil, animated: Bool = true) {
         if blocked { return }
         let q = transform.toMap(Pt(p.x, p.y))
+        if !reduceMotion && !instant {
+            wind.pointerMoved(q, at: t ?? Self.now())
+            if !windActive && !wind.spring.settled { windActive = true }
+        }
         move(to: CGPoint(x: q.x, y: q.y), in: map, at: t ?? Self.now(), animated: animated)
     }
 
@@ -188,5 +197,41 @@ struct MouseTracking: NSViewRepresentable {
         override func mouseMoved(with e: NSEvent) { onMove(convert(e.locationInWindow, from: nil)) }
         override func mouseExited(with e: NSEvent) { onExit() }
     }
+}
+/// D29: the breeze state. Not published: the map's TimelineView reads and steps it while active.
+@MainActor
+final class WindEngine {
+    private(set) var spring = Spring2D()
+    private(set) var pointer: Pt?
+    private var last: (p: Pt, t: Double)?
+    private var lastStep: Double?
+    /// DEBUG capture: the clock used instead of the timeline's date.
+    var manualTime: Double?
+
+    func pointerMoved(_ p: Pt, at t: Double) {
+        if let l = last { spring.push(Wind.impulse(from: l.p, to: p, dt: t - l.t)) }
+        last = (p, t); pointer = p
+    }
+    /// Advances the spring to `t`; returns true once settled (the timeline then pauses).
+    @discardableResult
+    func step(to date: Double) -> Bool {
+        let t = manualTime ?? date
+        spring.advance(lastStep.map { t - $0 } ?? 0)
+        lastStep = spring.settled ? nil : t
+        return spring.settled
+    }
+    func motion(exclude: Set<String>) -> (Leaf) -> LeafMotion? {
+        let p = pointer, g = spring.pos
+        return { leaf in
+            if exclude.contains(leaf.item.id) { return nil }
+            let s = Wind.sway(leaf: leaf.centroid, id: leaf.item.id, pointer: p, gust: g)
+            return s.angle == 0 && s.dx == 0 && s.dy == 0 ? nil : LeafMotion(angle: s.angle, dx: s.dx, dy: s.dy)
+        }
+    }
+}
+
+/// D29: a drawing-only transform for one leaf (about its centroid).
+struct LeafMotion {
+    var angle = 0.0, dx = 0.0, dy = 0.0, scale = 1.0, opacity = 1.0
 }
 #endif

@@ -203,3 +203,21 @@ Supersedes D22's pointer tooltip (and the "Pinned · Esc" label from D22/D24). D
 - **Checks:**
   - Core: `OptimisticRemovalTests` (a real git removal, rollback, a failed list, the main checkout never dropped, header tightening).
   - App: DEBUG `--remove-trial` via `scripts/remove-trial.sh`. It builds a throwaway repo with a merged worktree at /tmp/arborist-trial-remove and removes it through the app path. It then asserts the leaf is gone in the next frame, the counts and Clear N drop, no pin or strip remains, the re-list confirms the removal, and the folder is gone.
+
+## D29 — Leaf wind and blow-away delete (stacked on #18)
+
+Requested as "D27" by Cedric; D27/D27b and D28 were already taken, so it is logged as D29.
+
+- **Wind:** leaves within 120 pt of the pointer sway (≤3.5°, ≤2.5 pt) with a (1−(d/r)²)² falloff, driven by a damped
+  2-D spring (`Spring2D`, stiffness 90, damping 11) pushed by pointer velocity. Drawing only: a per-leaf Canvas
+  transform about the centroid; hit areas, hover, select and sweeps are unchanged. Hovered/pinned leaves are held still
+  (they are also drawn by the ring layer, which does not sway).
+- **Idle CPU:** a `TimelineView(.animation(paused:))` exists only while `HoverModel.windActive`; it is set on a pointer
+  move that unsettles the spring and cleared once the spring snaps to rest. No constant timers. Core tests prove the
+  spring settles within 2 s, is idle at rest, and the falloff/sway are bounded.
+- **Delete:** the removed leaf blows toward its nearest edge (lift 10 pt, ±220° tumble, sideways drift, opacity 1−t²)
+  over 0.7 s, replacing #18's 0.2 s shrink. Visual only: the model still updates instantly (remove-trial holds).
+- **Reduce Motion:** no wind; delete is a plain 0.2 s fade. Instant (sweep) mode: neither.
+- **Capture:** DEBUG `--motion-capture DIR` (ARBORIST_HOVER_SWEEP=1, cleanup disabled, manual spring clock) and
+  `scripts/motion-capture.sh` write wind-moving/stopped/settled and blow-/fade- frames.
+- Math in `ArboristCore/Leaves/Wind.swift` (`Spring2D`, `Wind`, `BlowAway`). macOS UI unverified on Linux.
